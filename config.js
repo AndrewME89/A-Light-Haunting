@@ -13,63 +13,42 @@ const CONFIG = {
   weatherUpdateMinutes: 5,
 
   // ---------------------------------------------------------------------
-  // Raven behaviour timing
+  // Raven behaviour scheduling — how OFTEN each gesture fires. The
+  // gesture itself (what it looks like, how long it takes) now comes from
+  // a pre-rendered video clip, not procedural timing — see "How the raven
+  // animates" in README. Durations below are for scheduling only.
   // ---------------------------------------------------------------------
   blinkMinSeconds: 20,
   blinkMaxSeconds: 120,
-  // Eyelid-closed hold duration (not counting the fade in/out below).
-  blinkDurationMinMs: 90,
-  blinkDurationMaxMs: 180,
-  doubleBlinkChance: 0.1,          // chance a blink is followed by a second, quick blink
-  doubleBlinkPauseMs: 220,
-  // Blink must read as an eyelid, not a dissolve — keep these fast.
-  blinkFadeInMinMs: 50,
-  blinkFadeInMaxMs: 90,
-  blinkFadeOutMinMs: 60,
-  blinkFadeOutMaxMs: 110,
 
   ruffleMinMinutes: 4,
   ruffleMaxMinutes: 20,
-  // The ruffle is one continuous feather-turbulence gesture (ramp up then
-  // back down), not discrete frames — see "How the raven animates" in
-  // README. Total duration of that single gesture:
-  ruffleDurationMinMs: 500,
-  ruffleDurationMaxMs: 750,
-  // Max displacement (px) the turbulence filter pushes feather pixels at
-  // the peak of the gesture. Keep small — this should read as a shiver,
-  // not a warp.
-  ruffleDisplacementScale: 5,
-  // SVG feTurbulence baseFrequency ("x y"). Higher = finer/tighter ripples.
-  ruffleTurbulenceFrequency: '0.06 0.09',
 
   headMoveMinMinutes: 10,
   headMoveMaxMinutes: 40,
-  headMoveHoldMinMs: 1400,
-  headMoveHoldMaxMs: 3200,
-  // Transform transition duration turning into / back out of the pose.
-  headMoveFadeInMinMs: 180,
-  headMoveFadeInMaxMs: 250,
-  headMoveFadeOutMinMs: 220,
-  headMoveFadeOutMaxMs: 320,
 
-  // "Look at viewer" — deliberately rare, on its own independent
+  // A small independent "settle/shift" gesture (assets/raven/video/subtle.mp4)
+  // — its own rare scheduler, same philosophy as the others.
+  subtleMinMinutes: 6,
+  subtleMaxMinutes: 25,
+
+  // "Look at viewer" — deliberately the rarest, on its own independent
   // scheduler so it never gets mixed in with ordinary head-turn odds.
   lookViewerMinMinutes: 60,
   lookViewerMaxMinutes: 180,
   // Chance a scheduled attempt is skipped outright (just reschedules),
   // so real-world gaps of many hours are common.
   lookViewerSkipChance: 0.3,
-  lookViewerHoldMinMs: 1500,
-  lookViewerHoldMaxMs: 3000,
-  lookViewerFadeInMinMs: 220,
-  lookViewerFadeInMaxMs: 300,
-  lookViewerFadeOutMinMs: 260,
-  lookViewerFadeOutMaxMs: 360,
 
   // Occasionally skip a scheduled event entirely and roll a much longer
   // wait instead, so the viewer can never learn the rhythm.
   longQuietPeriodChance: 0.12,
   longQuietPeriodMultiplier: 3,
+
+  // Crossfade between the static resting image and the video overlay
+  // when a gesture starts/ends (and vice versa). Kept short — this just
+  // smooths the seam, it's not meant to be noticeable itself.
+  ravenVideoCrossfadeMs: 120,
 
   // ---------------------------------------------------------------------
   // Audio (inert until CONFIG.audioEnabled + real samples in assets/audio/)
@@ -104,11 +83,8 @@ const CONFIG = {
   // Background-only cemetery scene (raven cleanly removed).
   heroImage: 'assets/backgrounds/cemetery-background.png',
 
-  // Single isolated raven cutout (transparent PNG), pixel-aligned to the
-  // same 1672×941 canvas as heroImage. There is no separate pose art —
-  // every animation (blink, ruffle, head-move, look-viewer) is produced
-  // procedurally in CSS/SVG on top of this one image. See README
-  // "How the raven animates".
+  // The raven at rest: a single isolated cutout, pixel-aligned to the
+  // same canvas as heroImage. Shown whenever no gesture video is playing.
   ravenImage: 'assets/raven/raven-normal.png',
 
   // Painted fog overlays (real artwork, not CSS gradients). Missing files
@@ -116,28 +92,48 @@ const CONFIG = {
   fogFarImage: 'assets/weather/fog-far.png',
   fogNearImage: 'assets/weather/fog-near.png',
 
-  // --- Calibration (all normalized 0–1, expressed as CSS percentages,
-  // relative to the scene box — ravenImage already shares the scene's
-  // canvas alignment so no separate raven-local coordinate space is
-  // needed). Tune with the calibration tool: enable debug mode, press
-  // "c", click the scene, and read the logged percentages from the
-  // console. ---
+  // ---------------------------------------------------------------------
+  // Raven gesture videos
+  // ---------------------------------------------------------------------
+  // Each is a short clip against a *flat* black or white background (no
+  // alpha channel — these are plain MP4s). At playback, a WebGL shader
+  // keys out that flat background in real time so only the raven shows,
+  // composited over heroImage exactly where raven-normal.png normally
+  // sits. `key` says which flat colour to remove. See README "How the
+  // raven animates" for the keying/watermark-crop approach and its one
+  // known limitation (very dark shadow feathers on the black-keyed clips
+  // can pick up faint transparency, since they're nearly the same colour
+  // as the background in that footage).
+  ravenVideos: {
+    blink:      { src: 'assets/raven/video/blink.mp4',       key: 'black' },
+    ruffle:     { src: 'assets/raven/video/ruffle.mp4',      key: 'black' },
+    headLeft:   { src: 'assets/raven/video/head-left.mp4',   key: 'white' },
+    lookViewer: { src: 'assets/raven/video/look-viewer.mp4', key: 'black' },
+    subtle:     { src: 'assets/raven/video/subtle.mp4',      key: 'white' }
+  },
 
-  // Polygon isolating just the body/wing/tail feathers — deliberately
-  // excludes the head/beak/eye, so the ruffle filter never distorts the
-  // face. Roughly "everything below the shoulder line".
-  ruffleClipPath: [
-    '52% 30%', '56% 40%', '54% 58%', '46% 74%', '35% 92%',
-    '11% 89%', '14% 68%', '20% 36%', '33% 30%'
-  ],
+  // Two of the clips have a small AI-tool watermark burned into the
+  // bottom-right corner, outside where the raven ever sits. This
+  // normalized (0–1) rectangle is forced fully transparent regardless of
+  // colour, cropping the watermark out of the visible composite.
+  ravenVideoWatermarkCrop: { x: 0.83, y: 0.80 },
 
-  // Anchor point the raven pivots around for head-turn transforms —
-  // roughly where the neck meets the body.
-  headAnchor: { x: 0.5, y: 0.28 },
-
-  // Eyelid-overlay placement for the blink illusion.
-  eyePosition: { x: 0.458, y: 0.177 },
-  eyeSize: { width: 0.035, height: 0.028 },
+  // Luma-key softness: pixels within this normalized luminance distance
+  // of the key colour fade to transparent (smoothstep between the two
+  // values). Split per key colour because the safe margin is very
+  // different for each:
+  //  - black: the raven's own darkest shadow feathers measure almost
+  //    identical to the black background (RGB ~0,1,3) in this footage, so
+  //    this must stay tight even though it leaves a little background
+  //    noise unkeyed at body edges — see the shadow-feather note above.
+  //  - white: a dark bird against a white background has huge natural
+  //    contrast, so this can be much more generous — wide enough to
+  //    reliably clear near-white (not just pure-white) background pixels
+  //    from video compression, with no risk to the (dark) raven.
+  ravenVideoKeyThreshold: {
+    black: { low: 0.01, high: 0.05 },
+    white: { low: 0.06, high: 0.14 }
+  },
 
   // ---------------------------------------------------------------------
   // Portrait state (external-integration hook — v1 only ever uses ACTIVE,

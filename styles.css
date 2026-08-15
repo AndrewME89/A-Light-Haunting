@@ -6,10 +6,10 @@
      1 cemetery background   2 far fog   3 raven   4 near fog
      5 day/night   6 clouds/overcast   7 rain   8 lightning   9 vignette
 
-   The raven is one isolated image (assets/raven/raven-normal.png). There
-   is no pose-swap art — blink, ruffle, head-move and look-viewer are all
-   produced procedurally here in CSS/SVG. See README "How the raven
-   animates". */
+   The raven rests as a single static image (assets/raven/raven-normal.png).
+   Gestures (blink, ruffle, head-move, subtle, look-viewer) are short video
+   clips, real-time keyed and composited by app.js's WebGL layer onto the
+   canvas here — see README "How the raven animates". */
 
 :root {
   --scene-w: 1920;
@@ -32,7 +32,7 @@ html, body {
   font-family: -apple-system, "Segoe UI", sans-serif;
 }
 
-.svg-defs {
+.raven-video-sources {
   position: absolute;
   width: 0;
   height: 0;
@@ -94,17 +94,13 @@ html, body {
 }
 
 /* ---------------------------------------------------------------- */
-/* 3. Raven — single image, procedurally animated                    */
+/* 3. Raven — static resting image + WebGL-composited gesture video */
 /* ---------------------------------------------------------------- */
 .layer-raven {
   z-index: 3;
-  transform: translate(0, 0) rotate(0deg) scale(1);
-  transform-origin: var(--head-anchor-x, 50%) var(--head-anchor-y, 28%);
-  transition: transform 900ms cubic-bezier(.33,.66,.4,1), filter 700ms ease;
-  filter: brightness(1);
 }
 
-/* Base: the raven, always visible, exactly as painted. */
+/* Base: the raven at rest, exactly as painted. */
 .raven-base {
   position: absolute;
   inset: 0;
@@ -114,55 +110,26 @@ html, body {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  opacity: 1;
+  transition: opacity var(--raven-crossfade-ms, 120ms) ease;
+}
+.raven-base.raven-base-hidden {
+  opacity: 0;
 }
 
-/* Ruffle: an identical copy of the same image, clipped to just the
-   body/wing/tail feathers, sitting pixel-perfectly on top of .raven-base.
-   At rest (scale=0 on the SVG filter, no `ruffle-active` class) it's
-   indistinguishable from the base beneath it — the filter is only
-   attached while active, so there's zero cost the other 99% of the time. */
-.raven-ruffle-layer {
+/* Video canvas: WebGL-rendered, real-time keyed gesture clip. Mutually
+   exclusive with .raven-base — only one is visible at a time, crossfaded
+   over the short transition above so the swap doesn't hard-cut. */
+.raven-video-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  background-image: var(--raven-image, none);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  clip-path: var(--ruffle-clip, none);
-}
-.raven-ruffle-layer.ruffle-active {
-  filter: url(#featherRuffleFilter);
-}
-
-/* Head-move / look-viewer — subtle transforms on the whole rig, so the
-   base image and the ruffle overlay always move together in lockstep. */
-.raven-move-left  { transform: translate(-0.35%, -0.15%) rotate(-1.1deg) scale(1.002); }
-.raven-move-right { transform: translate(0.35%, -0.1%) rotate(1.1deg) scale(1.002); }
-.raven-move-viewer{ transform: scale(1.008); filter: brightness(1.03); }
-
-/* Eyelid overlay used to fake a blink — a small soft dark patch over the
-   eye, not a swapped image. */
-.raven-blink {
-  position: absolute;
-  left: calc(var(--eye-x, 46.5%) - var(--eye-w, 5%) / 2);
-  top: calc(var(--eye-y, 18.5%) - var(--eye-h, 3.2%) / 2);
-  width: var(--eye-w, 5%);
-  height: var(--eye-h, 3.2%);
-  border-radius: 50% / 45%;
-  background: radial-gradient(ellipse at center,
-    rgba(6,7,10,0.96) 0%, rgba(6,7,10,0.9) 55%, rgba(6,7,10,0) 100%);
   opacity: 0;
-  filter: blur(0.5px);
+  transition: opacity var(--raven-crossfade-ms, 120ms) ease;
 }
-.raven-blink.blink-active {
+.raven-video-canvas.raven-video-active {
   opacity: 1;
-  transition: opacity var(--blink-in-ms, 70ms) ease-in;
-}
-.raven-blink.blink-closing {
-  opacity: 0;
-  transition: opacity var(--blink-out-ms, 90ms) ease-out;
 }
 
 /* ---------------------------------------------------------------- */

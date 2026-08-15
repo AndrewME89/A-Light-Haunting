@@ -5,18 +5,16 @@
  *  - Everything timing-related uses recursive setTimeout with fresh random
  *    delays each time (never setInterval), so no two events share a phase
  *    and the viewer can't learn a rhythm.
- *  - The raven is ONE isolated image (assets/raven/raven-normal.png,
- *    pixel-aligned to the same canvas as the background). There is no
- *    pose-swap art. Every behaviour is produced procedurally:
- *      blink        — a small dark eyelid shape overlaid on the eye
- *      ruffle       — an SVG feTurbulence/feDisplacementMap filter,
- *                     applied only to a clipped body/wing/tail region so
- *                     the head never distorts, tweened up and back down
- *      head-move /
- *      look-viewer  — a subtle CSS transform (translate/rotate/scale) on
- *                     the whole raven rig
- *    This avoids any hard image swap — the raven's body is always the
- *    same pixels, so nothing can visibly "jump".
+ *  - The raven rests as ONE static image (assets/raven/raven-normal.png).
+ *    Gestures (blink, ruffle, head-move, subtle, look-viewer) are short
+ *    pre-rendered video clips (assets/raven/video/*.mp4). Each clip sits
+ *    on a flat black or white background with no alpha channel, so at
+ *    playback a small WebGL shader keys that flat colour out in real
+ *    time and composites just the raven over the cemetery background —
+ *    see initRavenVideoGL()/playGestureVideo() below, and README "How the
+ *    raven animates" for the one known limitation (very dark shadow
+ *    feathers on the black-keyed clips are close to the same colour as
+ *    the background in that footage).
  *  - window.RavenPortrait is the public surface future modules (weather,
  *    audio, house integration) call into.
  */
@@ -33,17 +31,6 @@
   const secondsToMs = (s) => s * 1000;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-  function pickWeighted(entries) {
-    // entries: [{ value, weight }]
-    const total = entries.reduce((sum, e) => sum + e.weight, 0);
-    let r = Math.random() * total;
-    for (const e of entries) {
-      if (r < e.weight) return e.value;
-      r -= e.weight;
-    }
-    return entries[entries.length - 1].value;
-  }
 
   function log(...args) {
     if (!CONFIG.debug) return;
@@ -64,10 +51,7 @@
   const heroEl = document.getElementById('layer-hero');
   const layerRavenEl = document.getElementById('layer-raven');
   const ravenBaseEl = document.getElementById('raven-base');
-  const ravenRuffleLayerEl = document.getElementById('raven-ruffle-layer');
-  const ravenBlinkEl = document.getElementById('raven-blink');
-  const ruffleTurbulenceEl = document.getElementById('ruffleTurbulence');
-  const ruffleDisplacementEl = document.getElementById('ruffleDisplacementMap');
+  const ravenVideoCanvas = document.getElementById('raven-video-canvas');
   const daynightEl = document.getElementById('layer-daynight');
   const cloudsEl = document.getElementById('layer-clouds');
   const fogFarEl = document.getElementById('layer-fog-far');
@@ -118,10 +102,10 @@
   });
 
   // ----------------------------------------------------------------
-  // Raven — single isolated image, procedurally animated
+  // Raven — static resting image
   // ----------------------------------------------------------------
   let ravenLoaded = false;
-  let currentGesture = 'normal'; // debug-only label, not a render mode
+  let currentGesture = 'normal'; // debug-only label
 
   function preloadImage(src) {
     return new Promise((resolve) => {
@@ -136,21 +120,12 @@
     const loaded = await preloadImage(CONFIG.ravenImage);
     if (!loaded) {
       log('WARNING: raven image failed to load at', CONFIG.ravenImage, '— scene will show the cemetery with no raven');
-      log('renderer: MISSING');
       return;
     }
     sceneEl.style.setProperty('--raven-image', `url("${CONFIG.ravenImage}")`);
-    sceneEl.style.setProperty('--ruffle-clip', `polygon(${CONFIG.ruffleClipPath.join(', ')})`);
-    sceneEl.style.setProperty('--head-anchor-x', `${CONFIG.headAnchor.x * 100}%`);
-    sceneEl.style.setProperty('--head-anchor-y', `${CONFIG.headAnchor.y * 100}%`);
-    sceneEl.style.setProperty('--eye-x', `${CONFIG.eyePosition.x * 100}%`);
-    sceneEl.style.setProperty('--eye-y', `${CONFIG.eyePosition.y * 100}%`);
-    sceneEl.style.setProperty('--eye-w', `${CONFIG.eyeSize.width * 100}%`);
-    sceneEl.style.setProperty('--eye-h', `${CONFIG.eyeSize.height * 100}%`);
-    ruffleTurbulenceEl.setAttribute('baseFrequency', CONFIG.ruffleTurbulenceFrequency);
+    sceneEl.style.setProperty('--raven-crossfade-ms', CONFIG.ravenVideoCrossfadeMs + 'ms');
     ravenLoaded = true;
-    log('raven image loaded — animating procedurally (no pose-swap assets)');
-    log('renderer: PROCEDURAL');
+    log('raven image loaded');
   }
 
   // ----------------------------------------------------------------
@@ -189,7 +164,224 @@
   }
 
   // ----------------------------------------------------------------
-  // Raven behaviour: blink / ruffle / head move / look-at-viewer
+  // Raven gesture videos — WebGL real-time luma-key compositor
+  // ----------------------------------------------------------------
+  const videoEls = {
+    blink: document.getElementById('video-blink'),
+    ruffle: document.getElementById('video-ruffle'),
+    headLeft: document.getElementById('video-headLeft'),
+    lookViewer: document.getElementById('video-lookViewer'),
+    subtle: document.getElementById('video-subtle')
+  };
+  const videoAvailable = {};
+
+  let gl = null;
+  let glProgram = null;
+  let glTexture = null;
+  const glUniforms = {};
+  let glReady = false;
+
+  const VERTEX_SRC = `
+    attribute vec2 aPosition;
+    varying vec2 vBaseUV;
+    void main() {
+      vBaseUV = aPosition * 0.5 + 0.5;
+      gl_Position = vec4(aPosition, 0.0, 1.0);
+    }
+  `;
+
+  // Keys out a flat black or white background in real time. Distance from
+  // the key colour is measured as luminance (or 1-luminance for white),
+  // then smoothstep'd between uKeyLow/uKeyHigh into an alpha value — a
+  // tight band so it only clears genuinely flat background, not merely
+  // dark/light raven pixels. uWatermarkCrop forces the bottom-right corner
+  // (where two of the source clips have a burned-in tool watermark)
+  // fully transparent regardless of colour.
+  const FRAGMENT_SRC = `
+    precision mediump float;
+    varying vec2 vBaseUV;
+    uniform sampler2D uVideo;
+    uniform vec2 uUVScale;
+    uniform vec2 uUVOffset;
+    uniform float uKeyMode;
+    uniform float uKeyLow;
+    uniform float uKeyHigh;
+    uniform vec2 uWatermarkCrop;
+    void main() {
+      vec2 uv = vBaseUV * uUVScale + uUVOffset;
+      vec4 color = texture2D(uVideo, uv);
+      float lum = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+      float dist = uKeyMode < 0.5 ? lum : (1.0 - lum);
+      float alpha = smoothstep(uKeyLow, uKeyHigh, dist);
+      // uWatermarkCrop.y is authored as "fraction down from the top" (the
+      // usual image convention), but uv.y here runs bottom-up (GL
+      // convention), so the bottom-right corner is uv.x high / uv.y LOW.
+      if (uv.x > uWatermarkCrop.x && uv.y < (1.0 - uWatermarkCrop.y)) {
+        alpha = 0.0;
+      }
+      gl_FragColor = vec4(color.rgb, alpha);
+    }
+  `;
+
+  function compileShader(type, src) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      log('WARNING: raven video shader failed to compile:', gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  }
+
+  function initRavenVideoGL() {
+    gl = ravenVideoCanvas.getContext('webgl', { alpha: true, premultipliedAlpha: false })
+      || ravenVideoCanvas.getContext('experimental-webgl', { alpha: true, premultipliedAlpha: false });
+    if (!gl) {
+      log('WARNING: WebGL unavailable — raven gesture videos disabled, raven will stay static');
+      return false;
+    }
+    const vs = compileShader(gl.VERTEX_SHADER, VERTEX_SRC);
+    const fs = compileShader(gl.FRAGMENT_SHADER, FRAGMENT_SRC);
+    if (!vs || !fs) return false;
+
+    glProgram = gl.createProgram();
+    gl.attachShader(glProgram, vs);
+    gl.attachShader(glProgram, fs);
+    gl.linkProgram(glProgram);
+    if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS)) {
+      log('WARNING: raven video shader program failed to link:', gl.getProgramInfoLog(glProgram));
+      return false;
+    }
+    gl.useProgram(glProgram);
+
+    const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+    const aPosition = gl.getAttribLocation(glProgram, 'aPosition');
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+    glTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, glTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+    glUniforms.uVideo = gl.getUniformLocation(glProgram, 'uVideo');
+    glUniforms.uUVScale = gl.getUniformLocation(glProgram, 'uUVScale');
+    glUniforms.uUVOffset = gl.getUniformLocation(glProgram, 'uUVOffset');
+    glUniforms.uKeyMode = gl.getUniformLocation(glProgram, 'uKeyMode');
+    glUniforms.uKeyLow = gl.getUniformLocation(glProgram, 'uKeyLow');
+    glUniforms.uKeyHigh = gl.getUniformLocation(glProgram, 'uKeyHigh');
+    glUniforms.uWatermarkCrop = gl.getUniformLocation(glProgram, 'uWatermarkCrop');
+
+    gl.uniform2f(glUniforms.uWatermarkCrop, CONFIG.ravenVideoWatermarkCrop.x, CONFIG.ravenVideoWatermarkCrop.y);
+
+    return true;
+  }
+
+  // Replicates CSS `background-size: cover` — scales+crops (never
+  // stretches) so the video fills the box, matching how raven-base sits.
+  function computeCoverUV(videoW, videoH, boxW, boxH) {
+    const videoAspect = videoW / videoH;
+    const boxAspect = boxW / boxH;
+    if (videoAspect > boxAspect) {
+      const visibleWidth = boxAspect / videoAspect;
+      return { scaleX: visibleWidth, scaleY: 1, offsetX: (1 - visibleWidth) / 2, offsetY: 0 };
+    }
+    const visibleHeight = videoAspect / boxAspect;
+    return { scaleX: 1, scaleY: visibleHeight, offsetX: 0, offsetY: (1 - visibleHeight) / 2 };
+  }
+
+  function drawGLFrame(videoEl, uv) {
+    gl.viewport(0, 0, ravenVideoCanvas.width, ravenVideoCanvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, glTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, videoEl);
+    gl.uniform1i(glUniforms.uVideo, 0);
+    gl.uniform2f(glUniforms.uUVScale, uv.scaleX, uv.scaleY);
+    gl.uniform2f(glUniforms.uUVOffset, uv.offsetX, uv.offsetY);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  async function initRavenVideos() {
+    glReady = initRavenVideoGL();
+    if (!glReady) return;
+
+    const keys = Object.keys(CONFIG.ravenVideos);
+    await Promise.all(keys.map((key) => new Promise((resolve) => {
+      const cfg = CONFIG.ravenVideos[key];
+      const el = videoEls[key];
+      if (!el) { videoAvailable[key] = false; resolve(); return; }
+      function onReady() { videoAvailable[key] = true; cleanup(); resolve(); }
+      function onError() {
+        videoAvailable[key] = false;
+        log('WARNING: missing/failed raven gesture video "' + key + '" (' + cfg.src + ') — that gesture will be skipped');
+        cleanup(); resolve();
+      }
+      function cleanup() {
+        el.removeEventListener('loadeddata', onReady);
+        el.removeEventListener('error', onError);
+      }
+      el.addEventListener('loadeddata', onReady);
+      el.addEventListener('error', onError);
+      el.src = cfg.src;
+    })));
+
+    const readyCount = Object.values(videoAvailable).filter(Boolean).length;
+    log('raven gesture videos ready:', readyCount + '/' + keys.length);
+    log('renderer: VIDEO (WebGL)');
+  }
+
+  function playGestureVideo(key) {
+    return new Promise((resolve) => {
+      const cfg = CONFIG.ravenVideos[key];
+      const el = videoEls[key];
+      if (!glReady || !cfg || !el || !videoAvailable[key]) { resolve(); return; }
+
+      ravenVideoCanvas.width = ravenVideoCanvas.clientWidth;
+      ravenVideoCanvas.height = ravenVideoCanvas.clientHeight;
+      const uv = computeCoverUV(el.videoWidth, el.videoHeight, ravenVideoCanvas.clientWidth, ravenVideoCanvas.clientHeight);
+
+      const threshold = CONFIG.ravenVideoKeyThreshold[cfg.key] || CONFIG.ravenVideoKeyThreshold.black;
+      gl.useProgram(glProgram);
+      gl.uniform1f(glUniforms.uKeyMode, cfg.key === 'white' ? 1 : 0);
+      gl.uniform1f(glUniforms.uKeyLow, threshold.low);
+      gl.uniform1f(glUniforms.uKeyHigh, threshold.high);
+
+      ravenBaseEl.classList.add('raven-base-hidden');
+      ravenVideoCanvas.classList.add('raven-video-active');
+
+      let rafId = null;
+      function onEnded() {
+        if (rafId) cancelAnimationFrame(rafId);
+        el.removeEventListener('ended', onEnded);
+        ravenVideoCanvas.classList.remove('raven-video-active');
+        ravenBaseEl.classList.remove('raven-base-hidden');
+        setTimeout(resolve, CONFIG.ravenVideoCrossfadeMs);
+      }
+      function frame() {
+        if (el.paused || el.ended) return;
+        drawGLFrame(el, uv);
+        rafId = requestAnimationFrame(frame);
+      }
+      el.addEventListener('ended', onEnded);
+      el.currentTime = 0;
+      el.play().then(() => {
+        rafId = requestAnimationFrame(frame);
+      }).catch(() => onEnded());
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // Raven behaviour: blink / ruffle / head move / subtle / look-at-viewer
   // ----------------------------------------------------------------
   let busy = false;
 
@@ -201,116 +393,26 @@
     };
   }
 
-  // --- Blink: eyelid overlay, not an image swap ---
-  const doBlink = withBusyGuard(async function doBlinkInner() {
-    await blinkOnce();
-    if (Math.random() < CONFIG.doubleBlinkChance) {
-      await wait(CONFIG.doubleBlinkPauseMs);
-      await blinkOnce();
-    }
-    log('blink');
-  });
-
-  function blinkOnce() {
-    return new Promise((resolve) => {
-      const holdMs = randInt(CONFIG.blinkDurationMinMs, CONFIG.blinkDurationMaxMs);
-      const fadeIn = randInt(CONFIG.blinkFadeInMinMs, CONFIG.blinkFadeInMaxMs);
-      const fadeOut = randInt(CONFIG.blinkFadeOutMinMs, CONFIG.blinkFadeOutMaxMs);
-      currentGesture = 'blink';
-      ravenBlinkEl.style.setProperty('--blink-in-ms', fadeIn + 'ms');
-      ravenBlinkEl.classList.remove('blink-closing');
-      ravenBlinkEl.classList.add('blink-active');
-      setTimeout(() => {
-        ravenBlinkEl.style.setProperty('--blink-out-ms', fadeOut + 'ms');
-        ravenBlinkEl.classList.remove('blink-active');
-        ravenBlinkEl.classList.add('blink-closing');
-        setTimeout(() => { currentGesture = 'normal'; resolve(); }, fadeOut);
-      }, holdMs);
+  function makeGesture(key, label, gestureName) {
+    return withBusyGuard(async () => {
+      log(label);
+      currentGesture = gestureName;
+      await playGestureVideo(key);
+      currentGesture = 'normal';
     });
   }
 
-  // --- Ruffle: SVG turbulence filter, tweened up then back down as one
-  // continuous gesture (not discrete frames), masked to body/wing/tail. ---
-  const doRuffle = withBusyGuard(async function doRuffleInner() {
-    const durationMs = randInt(CONFIG.ruffleDurationMinMs, CONFIG.ruffleDurationMaxMs);
-    log('ruffle', `(${durationMs}ms)`);
-    currentGesture = 'ruffle';
-    await animateRuffle(durationMs);
-    currentGesture = 'normal';
-  });
-
-  function animateRuffle(durationMs) {
-    return new Promise((resolve) => {
-      // Fresh turbulence pattern each time so no two ruffles look identical.
-      ruffleTurbulenceEl.setAttribute('seed', String(randInt(1, 999)));
-      ravenRuffleLayerEl.classList.add('ruffle-active');
-      const start = performance.now();
-      const peakAt = durationMs * 0.35;
-      function tick(now) {
-        const t = now - start;
-        let scale;
-        if (t < peakAt) {
-          scale = (t / peakAt) * CONFIG.ruffleDisplacementScale;
-        } else if (t < durationMs) {
-          scale = CONFIG.ruffleDisplacementScale * (1 - (t - peakAt) / (durationMs - peakAt));
-        } else {
-          scale = 0;
-        }
-        ruffleDisplacementEl.setAttribute('scale', Math.max(0, scale).toFixed(2));
-        if (t < durationMs) {
-          requestAnimationFrame(tick);
-        } else {
-          ruffleDisplacementEl.setAttribute('scale', '0');
-          ravenRuffleLayerEl.classList.remove('ruffle-active');
-          resolve();
-        }
-      }
-      requestAnimationFrame(tick);
-    });
-  }
-
-  // --- Head move / look-viewer: subtle transform on the whole rig ---
-  async function moveRig(className, holdMs, fadeInMs, fadeOutMs) {
-    layerRavenEl.style.transitionDuration = fadeInMs + 'ms';
-    layerRavenEl.classList.add(className);
-    await wait(holdMs);
-    layerRavenEl.style.transitionDuration = fadeOutMs + 'ms';
-    layerRavenEl.classList.remove(className);
-    await wait(fadeOutMs);
-  }
-
-  const doHeadMove = withBusyGuard(async function doHeadMoveInner() {
-    // Deliberately only left/right here — "look at viewer" has its own
-    // independent, much rarer scheduler (see doLookViewer below), so it
-    // never gets folded into ordinary head-turn odds.
-    const direction = pickWeighted([
-      { value: 'left', weight: 1 },
-      { value: 'right', weight: 1 }
-    ]);
-    log('head move:', direction);
-    currentGesture = 'head-' + direction;
-    const holdMs = randInt(CONFIG.headMoveHoldMinMs, CONFIG.headMoveHoldMaxMs);
-    const fadeIn = randInt(CONFIG.headMoveFadeInMinMs, CONFIG.headMoveFadeInMaxMs);
-    const fadeOut = randInt(CONFIG.headMoveFadeOutMinMs, CONFIG.headMoveFadeOutMaxMs);
-    const cls = direction === 'left' ? 'raven-move-left' : 'raven-move-right';
-    await moveRig(cls, holdMs, fadeIn, fadeOut);
-    currentGesture = 'normal';
-  });
-
+  const doBlink = makeGesture('blink', 'blink', 'blink');
+  const doRuffle = makeGesture('ruffle', 'ruffle', 'ruffle');
+  // Only ever turns left — there is no head-right clip.
+  const doHeadMove = makeGesture('headLeft', 'head move: left', 'head-left');
+  const doSubtle = makeGesture('subtle', 'subtle shift', 'subtle');
   // "Look at viewer" — psychological-ambiguity event. Extremely rare by
   // design: independent scheduler (see startSchedulers), long interval,
   // and a chance to skip a scheduled attempt outright so real gaps of
   // several hours are common. Debug key 'v' can trigger it on demand for
   // testing without affecting production rarity.
-  const doLookViewer = withBusyGuard(async function doLookViewerInner() {
-    log('look viewer (rare event)');
-    currentGesture = 'look-viewer';
-    const holdMs = randInt(CONFIG.lookViewerHoldMinMs, CONFIG.lookViewerHoldMaxMs);
-    const fadeIn = randInt(CONFIG.lookViewerFadeInMinMs, CONFIG.lookViewerFadeInMaxMs);
-    const fadeOut = randInt(CONFIG.lookViewerFadeOutMinMs, CONFIG.lookViewerFadeOutMaxMs);
-    await moveRig('raven-move-viewer', holdMs, fadeIn, fadeOut);
-    currentGesture = 'normal';
-  });
+  const doLookViewer = makeGesture('lookViewer', 'look viewer (rare event)', 'look-viewer');
 
   // ----------------------------------------------------------------
   // Independent random schedulers
@@ -341,6 +443,7 @@
     scheduleLoop(secondsToMs(CONFIG.blinkMinSeconds), secondsToMs(CONFIG.blinkMaxSeconds), doBlink, 'blink');
     scheduleLoop(minutesToMs(CONFIG.ruffleMinMinutes), minutesToMs(CONFIG.ruffleMaxMinutes), doRuffle, 'ruffle');
     scheduleLoop(minutesToMs(CONFIG.headMoveMinMinutes), minutesToMs(CONFIG.headMoveMaxMinutes), doHeadMove, 'headMove');
+    scheduleLoop(minutesToMs(CONFIG.subtleMinMinutes), minutesToMs(CONFIG.subtleMaxMinutes), doSubtle, 'subtle');
     scheduleLoop(minutesToMs(CONFIG.lookViewerMinMinutes), minutesToMs(CONFIG.lookViewerMaxMinutes), doLookViewer, 'lookViewer', { skipChance: CONFIG.lookViewerSkipChance });
   }
 
@@ -508,14 +611,13 @@
     getPortraitState: () => Portrait.state,
     isRavenLoaded: () => ravenLoaded,
     getRavenGesture: () => currentGesture,
+    isGestureVideoReady: (key) => !!videoAvailable[key],
     log
   };
 
   // ----------------------------------------------------------------
   // Debug mode
   // ----------------------------------------------------------------
-  let calibrationMode = false;
-
   function initDebug() {
     if (!CONFIG.debug) return;
     debugPanel.hidden = false;
@@ -526,6 +628,7 @@
         case 'b': doBlink(); break;
         case 'r': doRuffle(); break;
         case 'h': doHeadMove(); break;
+        case 'u': doSubtle(); break;
         case 'v': doLookViewer(); break;
         case 'l': triggerLightning(Math.random() < 0.5 ? 'weak' : 'strong'); break;
         case '1': setRain(rainIntensity > 0 ? 0 : 0.6); break;
@@ -539,22 +642,10 @@
         case 'i': Portrait.setState('IDLE'); break;
         case 's': Portrait.setState('SLEEP'); break;
         case 'w': Portrait.setState('AWAY'); break;
-        case 'c':
-          calibrationMode = !calibrationMode;
-          log('calibration mode', calibrationMode ? 'ON — click the scene' : 'off');
-          break;
         case 'd':
           debugPanel.hidden = !debugPanel.hidden;
           break;
       }
-    });
-
-    sceneEl.addEventListener('click', (e) => {
-      if (!calibrationMode) return;
-      const rect = sceneEl.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(1);
-      const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(1);
-      log(`'${x}% ${y}%',`);
     });
   }
 
@@ -565,12 +656,13 @@
     await initBackground();
     await initFog();
     await initRaven();
+    await initRavenVideos();
     initBurnInProtection();
     initDebug();
     startSchedulers();
     if (window.Weather && typeof window.Weather.init === 'function') window.Weather.init();
     if (window.RavenAudio && typeof window.RavenAudio.init === 'function') window.RavenAudio.init();
-    log('boot complete — raven loaded:', ravenLoaded,
+    log('boot complete — raven loaded:', ravenLoaded, '| webgl:', glReady,
       '| fog far:', fogFarAvailable, '| fog near:', fogNearAvailable);
   }
 

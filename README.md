@@ -2,8 +2,9 @@
 
 A full-screen "living portrait" web app: a Gothic cemetery scene with a raven
 that mostly just sits there — and, rarely, blinks, ruffles, turns its head,
-or seems to notice you. Built as plain HTML/CSS/JS for continuous operation
-on a Fire TV Stick (or any browser), no build step, no framework.
+shifts slightly, or seems to notice you. Built as plain HTML/CSS/JS for
+continuous operation on a Fire TV Stick (or any browser), no build step, no
+framework.
 
 The guiding rule: **stillness is the default.** If the raven's movement is
 ever obvious enough to look like "the animation is playing again," it's
@@ -11,81 +12,97 @@ tuned too aggressively — see `config.js`.
 
 ## Production renderer
 
-The live scene is composed from real painted layers, back to front:
+The live scene is composed from real painted/video layers, back to front:
 
 ```
 assets/backgrounds/cemetery-background.png   (raven-free base)
         ↓
 assets/weather/fog-far.png                   (painted, behind the raven)
         ↓
-raven (assets/raven/raven-normal.png — one image, animated procedurally)
+raven: assets/raven/raven-normal.png at rest, replaced in real time by a
+       gesture video (assets/raven/video/*.mp4) whenever one is playing
         ↓
 assets/weather/fog-near.png                  (painted, in front of the raven)
         ↓
 day/night → cloud/overcast → rain → lightning → vignette
 ```
 
-There is **no pose-swap art**. The raven is a single isolated, transparent
-cutout, pixel-aligned to the same canvas as the background. Every behaviour
-— blink, feather ruffle, head-turn, look-at-viewer — is produced
-procedurally in CSS/SVG on top of that one image. See "How the raven
-animates" below.
-
 Fog is real painted artwork, not a CSS gradient — see "Fog".
 
 ## How the raven animates
 
-At boot, `app.js` preloads `raven-normal.png`. If it fails to load, the
-scene just shows the cemetery with no raven (logged as a warning) rather
-than breaking. If it loads, three independent techniques animate it —
-nothing ever swaps to a different image:
+The raven rests as the static `raven-normal.png` almost all the time. Five
+short pre-rendered video clips (`assets/raven/video/`) — `blink`, `ruffle`,
+`head-left`, `subtle`, `look-viewer` — sit on their own independent random
+schedulers (see `config.js`). When one fires, `app.js`:
 
-**Blink** — a small dark eyelid-shaped overlay (`#raven-blink`) fades in
-over the eye, holds, fades out. Positioned via `CONFIG.eyePosition`/
-`eyeSize`.
+1. plays that clip on a hidden `<video>` element,
+2. real-time keys out its background with a small WebGL shader (see
+   below), drawing the result to a canvas positioned exactly where the
+   static raven sits,
+3. crossfades the static image out / canvas in (and back again once the
+   clip ends) over `CONFIG.ravenVideoCrossfadeMs` (120ms) — short enough
+   to just smooth the seam, not to read as an effect itself.
 
-**Feather ruffle** — an SVG filter (`feTurbulence` + `feDisplacementMap`,
-defined in `index.html`) is applied to a *second copy* of the raven image
-that's clipped to just the body/wing/tail region (`CONFIG.ruffleClipPath`)
-— the head/beak/eye are outside that clip, so they never distort. The
-filter's displacement is tweened up and back down by `app.js` over one
-continuous gesture (`ruffleDurationMinMs`/`MaxMs`), not discrete frames, and
-a fresh turbulence seed is picked each time so no two ruffles look
-identical. The filter is only attached to the DOM while active
-(`.ruffle-active`), so it costs nothing the rest of the time.
+Only one gesture plays at a time (a busy-guard blocks overlaps), and each
+clip runs its own full, unmodified length (roughly 5–6 seconds each) — so a
+gesture now reads as a brief cutaway shot of the raven doing something,
+rather than the near-instant flicker earlier procedural versions used.
+That's a real change in feel worth knowing about, not just a timing tweak.
 
-**Head-turn / look-at-viewer** — a subtle CSS `transform` (translate +
-rotate + scale, a couple px/degrees at most) on the whole raven rig,
-pivoting around `CONFIG.headAnchor`. Because there's only one flat image,
-this can't show a genuinely different angle — it reads as a small,
-plausible settling motion, not a real turn. That's an intentional
-trade-off for a smoother, cleaner-feeling animation over more dramatic but
-harder-swapped poses.
+### Why a shader, and its one real limitation
 
-Durations are randomized within a range each time, matching the "never
-learnable" timing philosophy:
+The clips are plain MP4s — no alpha channel — shot against a flat black or
+white background (`key: 'black' | 'white'` per clip in
+`CONFIG.ravenVideos`). A WebGL fragment shader (`initRavenVideoGL()` in
+`app.js`) samples each video frame, measures how close each pixel is to the
+key colour, and fades it to transparent within a narrow band
+(`CONFIG.ravenVideoKeyThreshold`) — this runs on the GPU so it's cheap
+enough to do every frame, unlike an equivalent CPU canvas pixel loop.
 
-| Event | Transition | Hold |
-|---|---|---|
-| Blink | 50–90ms in, 60–110ms out | 90–180ms closed |
-| Feather ruffle | one 500–750ms gesture (ramp up, ramp down) | — |
-| Head left/right | 180–250ms in, 220–320ms out | 1.4–3.2s |
-| Look at viewer | 220–300ms in, 260–360ms out | 1.5–3s |
+**Known limitation:** on the *black-keyed* clips (`blink`, `ruffle`,
+`look-viewer`), the raven's own darkest shadow feathers are very close to
+literal black (`RGB(0,1,3)` measured directly from footage) — essentially
+the same colour as the background being keyed out. This means those
+specific dark shadow areas can pick up faint, brief transparency during
+those three gestures. It's not a code bug; the source footage has almost no
+contrast between "raven in shadow" and "background" in those clips. The
+threshold is kept tight specifically to minimize this, at the cost of
+occasionally leaving a sliver of true-black background unkeyed at a body
+edge. The white-keyed clips (`head-left`, `subtle`) don't have this problem
+— a dark bird against white has natural contrast. If this matters enough to
+fix properly, the real fix is regenerating the black-background clips
+against a higher-contrast background (e.g. a saturated green/blue), not a
+code change.
 
-## "Look at viewer" — a deliberately rare event
+### Watermark crop
 
-Wired to its **own independent scheduler**, not folded into ordinary
+`look-viewer.mp4` has a burned-in "KlingAI 3.0" watermark, and `head-left.mp4`
+/ `subtle.mp4` have a second AI tool's watermark — both bottom-right, an
+area the raven never occupies in any clip. `CONFIG.ravenVideoWatermarkCrop`
+forces that corner fully transparent regardless of pixel colour, so it
+never appears in the composite. `blink.mp4` and `ruffle.mp4` are clean.
+
+### "Look at viewer" — a deliberately rare event
+
+Wired to its own independent scheduler, not folded into ordinary
 head-turns, so it stays rare enough to be unsettling rather than
 recognizable:
 
 - fires roughly every 60–180 minutes (`lookViewerMinMinutes`/`MaxMinutes`)
 - has a 30% chance (`lookViewerSkipChance`) of skipping a scheduled attempt
   outright and just rescheduling, so real gaps of many hours are common
-- plays: `normal → look-viewer transform → hold ~1.5–3s → normal`
 
 Debug key `v` triggers it immediately for testing — this does not affect
 production rarity, since it calls the same function the scheduler calls
 rather than touching the scheduler's timer.
+
+### No head-right
+
+There's only a `head-left` clip, no `head-right` — by design for now, head
+turns always go left. If a right-turn clip is added later, wire it into
+`CONFIG.ravenVideos` as `headRight` and add a second `makeGesture(...)` call
+in `app.js` next to `doHeadMove`.
 
 ## Quick start (local testing)
 
@@ -106,7 +123,8 @@ No build step, no server framework required.
    |---|---|
    | `b` | trigger a blink |
    | `r` | trigger a feather ruffle |
-   | `h` | trigger a head turn (left/right) |
+   | `h` | trigger a head turn (left only) |
+   | `u` | trigger the subtle settle/shift gesture |
    | `v` | trigger "look at viewer" (does not affect production rarity) |
    | `l` | trigger one lightning flash |
    | `1` | toggle rain |
@@ -115,11 +133,11 @@ No build step, no server framework required.
    | `4` | toggle full storm mode (rain + overcast + night + recurring lightning) |
    | `0` | reset all weather visuals |
    | `a` / `i` / `s` / `w` | set portrait state to ACTIVE / IDLE / SLEEP / AWAY |
-   | `c` | toggle calibration click-mode (see below) |
    | `d` | hide/show the debug panel |
 
-   The debug log also prints whether the raven image loaded, missing
-   fog/background assets, and weather state as it updates.
+   The debug log also prints whether WebGL initialized, how many gesture
+   videos loaded successfully, missing fog/background assets, and weather
+   state as it updates.
 
 5. When you're happy, set `debug: false` in `config.js` before deploying —
    the panel and all keyboard shortcuts disappear entirely.
@@ -135,46 +153,33 @@ direction smoothly over 3–4.5 minutes per leg) — enough to read as
 atmosphere, never as an animation layer. If `fog-near.png` is ever removed,
 that layer just stays inactive gracefully; the far layer still works alone.
 
-## Calibrating the raven
-
-`CONFIG.ruffleClipPath`, `headAnchor`, `eyePosition`, and `eyeSize` are all
-pre-calibrated against the current `raven-normal.png`. You'd only need to
-redo this if you swap in a different raven image or the composition
-changes:
-
-1. Set `debug: true`, reload, press `c` to enter calibration mode.
-2. Click around the body/wing/tail outline (excluding the head), roughly
-   8–10 points. Each click logs a `'NN.N% NN.N%',` line to the debug
-   panel/console.
-3. Copy those lines into `CONFIG.ruffleClipPath` in `config.js` (in order,
-   forming a closed polygon around just the feathered body).
-4. Click once on the neck/shoulder junction (where the head should pivot)
-   and copy that into `CONFIG.headAnchor` as `{ x, y }` (divide the logged
-   percentages by 100).
-5. Click the center of the raven's visible eye for `CONFIG.eyePosition`, and
-   adjust `CONFIG.eyeSize` (width/height, 0–1 fractions of the scene) until
-   the blink patch sits neatly over it.
-6. Press `b`/`r`/`h`/`v` to preview blink/ruffle/head-turn/look-viewer and
-   refine.
-
 ## Replacing assets
 
 ### Background (required)
 `assets/backgrounds/cemetery-background.png` — the raven-free cemetery
 scene. Update `CONFIG.heroImage` if you rename or relocate it.
 
-### Raven (required)
-`assets/raven/raven-normal.png` — the one raven image, transparent PNG at
-the same 1672×941 canvas as the background, pixel-aligned. Update
-`CONFIG.ravenImage` if you rename or relocate it, and re-run the
-calibration steps above if the pose/composition changed.
+### Raven at rest (required)
+`assets/raven/raven-normal.png` — shown whenever no gesture is playing.
+Update `CONFIG.ravenImage` if relocated.
 
-`assets/backgrounds/hero.png` (the original painting with the raven baked
-in) and the other pose PNGs previously used for sprite-swap rendering
+### Raven gesture videos (required for animation; app degrades gracefully without them)
+`assets/raven/video/blink.mp4`, `ruffle.mp4`, `head-left.mp4`, `subtle.mp4`,
+`look-viewer.mp4` — see `CONFIG.ravenVideos` for paths and each clip's key
+colour. To replace one, drop in a new MP4 with the same flat black-or-white
+background convention and update the matching entry (`src`, `key`) in
+`config.js`. A missing or failed clip just disables that one gesture
+(logged as a warning) — it doesn't break the page or the other gestures.
+
+If a new clip has its own watermark or artifact in a different corner,
+adjust `CONFIG.ravenVideoWatermarkCrop`, or set it to `{ x: 1, y: 1 }` to
+effectively disable the crop if it's not needed.
+
+`assets/backgrounds/hero.png`, the individual pose PNGs
 (`raven-blink.png`, `raven-ruffle-01/02.png`, `raven-head-left/right.png`,
-`raven-look-viewer.png`) are **not used by the current renderer** — nothing
-in the code references them. They're left in the repo rather than deleted
-in case you want to reference them later; safe to ignore.
+`raven-look-viewer.png`) and the `.svg` placeholders under `assets/` are all
+**unused by the current renderer** — left in the repo from earlier
+iterations rather than deleted; safe to ignore.
 
 ### Fog (optional, graceful if missing)
 `assets/weather/fog-far.png` / `assets/weather/fog-near.png` — see "Fog"
@@ -201,21 +206,18 @@ look. Wind above ~30 km/h subtly increases feather-ruffle frequency.
 
 Everything tunable lives in `config.js`. Key groups:
 
-- **Timing** — `blinkMin/MaxSeconds`, `ruffleMin/MaxMinutes`,
-  `headMoveMin/MaxMinutes`, `lookViewerMin/MaxMinutes`, plus
-  `longQuietPeriodChance` (occasional much longer pause so the rhythm stays
-  unlearnable) and `lookViewerSkipChance` (same idea, specific to the rare
-  look-at-viewer event).
-- **Transition speeds** — `blinkFadeIn/OutMin/MaxMs`,
-  `headMoveFadeIn/OutMin/MaxMs`, `lookViewerFadeIn/OutMin/MaxMs` — how long
-  each fade/transform transition takes.
-- **Ruffle filter** — `ruffleDurationMin/MaxMs` (length of the one
-  turbulence gesture), `ruffleDisplacementScale` (peak px displacement —
-  keep small, this should read as a shiver not a warp),
-  `ruffleTurbulenceFrequency` (SVG `feTurbulence` baseFrequency — higher is
-  finer/tighter ripples).
-- **Calibration** — `ruffleClipPath`, `headAnchor`, `eyePosition`,
-  `eyeSize` — see "Calibrating the raven" above.
+- **Scheduling** — `blinkMin/MaxSeconds`, `ruffleMin/MaxMinutes`,
+  `headMoveMin/MaxMinutes`, `subtleMin/MaxMinutes`,
+  `lookViewerMin/MaxMinutes`, plus `longQuietPeriodChance` (occasional much
+  longer pause so the rhythm stays unlearnable) and `lookViewerSkipChance`
+  (same idea, specific to the rare look-at-viewer event). These control
+  frequency only — how a gesture looks/how long it takes comes from its
+  video clip now, not from timing config.
+- **Raven video compositor** — `ravenVideos` (per-gesture clip path + key
+  colour), `ravenVideoKeyThreshold.black`/`.white` (luma-key softness, split
+  per key colour since the safe margin differs a lot — see "Why a shader"
+  above), `ravenVideoWatermarkCrop` (corner forced transparent),
+  `ravenVideoCrossfadeMs` (static ⇄ video crossfade duration).
 - **Audio** — off by default; see above.
 - **Display safety** — `burnInProtection`, `burnInCycleMinutes`,
   `burnInDriftPixels` (keep this tiny — 1–3px — it must stay imperceptible).
@@ -240,35 +242,42 @@ Everything tunable lives in `config.js`. Key groups:
    multi-hour soak test:
    - some Silk versions suspend background tabs/JS timers — keep the tab
      foregrounded and avoid switching inputs on the TV during testing;
-   - audio autoplay may be blocked until the first user gesture — this is
-     handled gracefully (playback attempts fail silently), but expect no
-     sound until the first tap;
+   - audio autoplay may be blocked until the first user gesture — video
+     gestures are muted so this doesn't affect them, but expect no ambient
+     audio (if enabled) until the first tap;
    - memory creep over very long uptimes — restart the Silk tab
      periodically (e.g. nightly) if you observe slowdown; this is a
      reasonable cron/automation task for a future version.
-   - **SVG filters** (the ruffle effect) are more GPU-dependent than plain
-     opacity/transform — it's only attached to the DOM for the ~0.5–0.75s
-     the ruffle is active, but if Silk on your specific Fire TV generation
-     struggles with it, lowering `ruffleDisplacementScale` reduces the
-     rendering cost proportionally.
+   - **WebGL support is required** for gesture videos to render. If Silk on
+     a given Fire TV generation lacks it, `app.js` logs a warning and the
+     raven simply stays static (never breaks the page) — worth confirming
+     WebGL works on your specific device during the soak test.
+   - Five video files totalling a few MB are preloaded at boot
+     (`preload="auto"`) — negligible over LAN/local hosting, but worth
+     knowing if hosting somewhere with a slow connection to the device.
 7. If Silk proves unreliable for continuous multi-day operation, the same
    HTML/CSS/JS can be packaged as a lightweight Fire TV HTML5 app instead —
    no rewrite needed, just a packaging step.
 8. **Not yet soak-tested on a physical Fire TV Stick** — verified in a
    desktop browser only so far. Recommended before relying on it: a
-   multi-hour run on the actual device, paying particular attention to the
-   SVG ruffle filter and the fog drift animation.
+   multi-hour run on the actual device, paying particular attention to
+   WebGL availability and video decode/playback smoothness.
 
 ## Known limitations
 
-- Head-turn and look-at-viewer are subtle transforms, not a real change of
-  angle — this is an inherent limit of animating one flat image rather than
-  a trade-off you can tune away. If a true angle change matters later,
-  that needs new art (a second photographed/painted angle), not more code.
+- **Dark-feather keying artifact** on the black-keyed clips (`blink`,
+  `ruffle`, `look-viewer`) — see "Why a shader, and its one real
+  limitation" above. Not fixable in code without regenerating that footage
+  against a higher-contrast background.
+- **Gestures are now ~5–6 seconds each** (the clips' native length), not
+  the near-instant flicker of earlier procedural versions. This is an
+  intentional trade-off from switching to real video — reconsider if it
+  no longer matches "stillness is the default" once you see it running.
+- **No head-right clip** — head turns always go left. See "No head-right"
+  above for how to add one later.
 - Old `.svg` placeholder files and the unused sprite-pose PNGs remain under
   `assets/` from earlier iterations. Nothing in the code references them;
-  they're inert and safe to ignore (or delete later if you want to tidy
-  the repo).
+  safe to ignore or delete later.
 - Weather and audio are wired but inert until you supply coordinates/samples
   — this is intentional, not a bug.
 - Day/night, cloud-darkening, wind-driven ruffle frequency, and lightning
@@ -283,10 +292,10 @@ Everything tunable lives in `config.js`. Key groups:
 
 ```
 A-Light-Haunting/
-├── index.html       ← includes the SVG feTurbulence/feDisplacementMap filter defs
+├── index.html       ← raven-base + WebGL canvas + 5 hidden preloaded <video> sources
 ├── styles.css
 ├── config.js         ← all tunable values
-├── app.js             ← core scene/behaviour engine + procedural raven animation
+├── app.js             ← core scene/behaviour engine + WebGL video compositor
 ├── weather.js          ← Open-Meteo integration, inert until lat/long set
 ├── audio.js              ← raven sample playback, inert until audioEnabled + samples
 ├── assets/
@@ -294,7 +303,13 @@ A-Light-Haunting/
 │   │   ├── cemetery-background.png   ← production background (raven-free)
 │   │   └── hero.png                   ← unused by current renderer, kept as reference
 │   ├── raven/
-│   │   ├── raven-normal.png            ← the only raven asset actually used
+│   │   ├── raven-normal.png            ← the raven at rest
+│   │   ├── video/
+│   │   │   ├── blink.mp4
+│   │   │   ├── ruffle.mp4
+│   │   │   ├── head-left.mp4
+│   │   │   ├── subtle.mp4
+│   │   │   └── look-viewer.mp4
 │   │   └── (other raven-*.png/.svg)    ← unused, kept from earlier iterations
 │   ├── weather/
 │   │   ├── fog-far.png

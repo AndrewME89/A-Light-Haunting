@@ -15,14 +15,13 @@
       <!-- 2. Far fog — painted overlay, sits behind the raven -->
       <div class="layer layer-fog layer-fog-far" id="layer-fog-far"></div>
 
-      <!-- 3. Raven — one isolated image, animated procedurally in CSS/SVG.
-           No pose-swap art: blink is an eyelid overlay, ruffle is an SVG
-           turbulence filter over just the body region, head-move/look-viewer
-           are subtle transforms on the whole rig. See README. -->
+      <!-- 3. Raven — a static resting image, replaced by a real-time
+           WebGL-composited video clip whenever a gesture is playing. The
+           canvas sits on top of (and is mutually exclusive with) the
+           static image — see README "How the raven animates". -->
       <div class="layer layer-raven" id="layer-raven">
         <div class="raven-base" id="raven-base"></div>
-        <div class="raven-ruffle-layer" id="raven-ruffle-layer"></div>
-        <div class="raven-blink" id="raven-blink"></div>
+        <canvas class="raven-video-canvas" id="raven-video-canvas"></canvas>
       </div>
 
       <!-- 4. Near fog — painted overlay, passes in front of the raven -->
@@ -45,26 +44,24 @@
     </div>
   </div>
 
-  <!-- SVG filter used only for the feather-ruffle gesture. Zero-size and
-       non-rendering on its own — just holds the filter definition that
-       styles.css/app.js reference via url(#featherRuffleFilter). -->
-  <svg class="svg-defs" aria-hidden="true" focusable="false">
-    <filter id="featherRuffleFilter" x="-25%" y="-25%" width="150%" height="150%">
-      <feTurbulence id="ruffleTurbulence" type="fractalNoise" baseFrequency="0.06 0.09"
-        numOctaves="2" seed="7" result="noise" />
-      <feDisplacementMap id="ruffleDisplacementMap" in="SourceGraphic" in2="noise"
-        scale="0" xChannelSelector="R" yChannelSelector="G" />
-    </filter>
-  </svg>
+  <!-- Hidden, preloaded gesture-video sources. Muted (autoplay-safe) and
+       never inserted into the visible layout — app.js reads frames from
+       these into the WebGL canvas above. -->
+  <div class="raven-video-sources" aria-hidden="true">
+    <video id="video-blink" muted playsinline preload="auto"></video>
+    <video id="video-ruffle" muted playsinline preload="auto"></video>
+    <video id="video-headLeft" muted playsinline preload="auto"></video>
+    <video id="video-lookViewer" muted playsinline preload="auto"></video>
+    <video id="video-subtle" muted playsinline preload="auto"></video>
+  </div>
 
   <div id="debug-panel" hidden>
     <div id="debug-title">DEBUG</div>
     <div id="debug-log"></div>
     <div class="debug-hint">
-      b=blink r=ruffle h=head-turn v=look-at-viewer l=lightning<br />
-      1=rain 2=fog 3=night 4=storm 0=reset<br />
-      a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY<br />
-      c=calibration click-mode &nbsp; d=hide panel
+      b=blink r=ruffle h=head-turn u=subtle v=look-at-viewer<br />
+      l=lightning 1=rain 2=fog 3=night 4=storm 0=reset<br />
+      a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY &nbsp; d=hide panel
     </div>
   </div>
 
