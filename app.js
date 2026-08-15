@@ -190,9 +190,10 @@
     }
   `;
 
-  // Keys out a flat black or white background in real time. Distance from
-  // the key colour is measured as luminance (or 1-luminance for white),
-  // then smoothstep'd between uKeyLow/uKeyHigh into an alpha value — a
+  // Keys out a flat black or white background in real time. Black-keyed
+  // footage uses the brightest RGB channel as its distance from black;
+  // white-keyed footage uses distance from white luminance. The distance
+  // is then smoothstep'd between uKeyLow/uKeyHigh into an alpha value — a
   // tight band so it only clears genuinely flat background, not merely
   // dark/light raven pixels. uWatermarkCrop forces the bottom-right corner
   // (where two of the source clips have a burned-in tool watermark)
@@ -226,7 +227,14 @@
     float alphaAt(vec2 uv) {
       vec3 c = texture2D(uVideo, uv).rgb;
       float lum = dot(c, vec3(0.299, 0.587, 0.114));
-      float dist = uKeyMode < 0.5 ? lum : (1.0 - lum);
+      // Luminance badly underweights the blue-black feather detail in the
+      // black-backed clips. That made much of the bird semi-transparent,
+      // allowing the brighter cemetery to show through as a grey wash.
+      // The source background is true RGB black, so max-channel distance
+      // separates it from tinted near-black feathers without changing the
+      // video's colour. White footage still benefits from a luma distance.
+      float fromBlack = max(c.r, max(c.g, c.b));
+      float dist = uKeyMode < 0.5 ? fromBlack : (1.0 - lum);
       return smoothstep(uKeyLow, uKeyHigh, dist);
     }
 
