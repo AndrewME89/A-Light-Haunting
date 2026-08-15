@@ -67,20 +67,24 @@ const CONFIG = {
   // ---------------------------------------------------------------------
   // Assets
   // ---------------------------------------------------------------------
-  // Single painted hero scene (cemetery + raven combined). This is the
-  // only required art asset for Version 1.
-  heroImage: 'assets/backgrounds/hero.png',
+  // Background-only cemetery scene (raven cleanly removed). Used as the
+  // static base layer under the raven sprite. NOTE: assets/backgrounds/hero.png
+  // (raven baked in) is kept only as a reference/fallback for clip-path mode —
+  // it must NOT be used as heroImage while real raven sprites exist, or the
+  // baked-in raven would "ghost" behind the moving sprite during animations.
+  heroImage: 'assets/backgrounds/cemetery-background.png',
 
-  // If assets/raven/normal.png (and friends) exist and load successfully,
-  // the app automatically switches to true sprite-swap mode instead of
-  // the clip-path trick below. See README "Asset replacement".
+  // assets/raven/raven-normal.png (and friends) exist and load successfully,
+  // so the app automatically uses true sprite-swap mode instead of the
+  // clip-path trick below. See README "Asset replacement".
   ravenSpriteMode: {
-    normal: 'assets/raven/normal.png',
-    blink: 'assets/raven/blink.png',
-    ruffle1: 'assets/raven/ruffle-01.png',
-    ruffle2: 'assets/raven/ruffle-02.png',
-    headLeft: 'assets/raven/head-left.png',
-    headRight: 'assets/raven/head-right.png'
+    normal: 'assets/raven/raven-normal.png',
+    blink: 'assets/raven/raven-blink.png',
+    ruffle1: 'assets/raven/raven-ruffle-01.png',
+    ruffle2: 'assets/raven/raven-ruffle-02.png',
+    headLeft: 'assets/raven/raven-head-left.png',
+    headRight: 'assets/raven/raven-head-right.png',
+    lookViewer: 'assets/raven/raven-look-viewer.png'
   },
 
   // --- Clip-path calibration (used only while sprite assets are absent) ---

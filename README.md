@@ -89,22 +89,26 @@ Drop your painting at `assets/backgrounds/hero.jpg` (or update
 minimum 1920×1080, landscape, raven placed off-centre per the art-direction
 brief.
 
-### True raven sprites (optional, better quality)
-If you later get proper cutout artwork, drop these into `assets/raven/`:
+### True raven sprites (in use)
+Real cutout artwork is already in place in `assets/raven/`:
 
 ```
-normal.png
-blink.png
-ruffle-01.png
-ruffle-02.png
-head-left.png
-head-right.png
+raven-normal.png
+raven-blink.png
+raven-ruffle-01.png
+raven-ruffle-02.png
+raven-head-left.png
+raven-head-right.png
+raven-look-viewer.png   ← used for the rare "toward viewer" head move
 ```
 
-The app **auto-detects** `assets/raven/normal.png` at boot. If it loads
-successfully, the app switches from clip-path mode to true sprite-swap mode
-automatically — no config or code change needed. Clip-path calibration
-becomes irrelevant in that mode.
+Each is a transparent PNG at the same 1672×941 canvas size as the background,
+so it overlays pixel-aligned on top of `assets/backgrounds/cemetery-background.png`
+(the same cemetery scene with the raven cleanly removed). The app
+**auto-detects** `assets/raven/raven-normal.png` at boot; since it loads
+successfully, sprite-swap mode is active and clip-path calibration is
+irrelevant. To replace any individual state, just overwrite that file — same
+filename, same canvas size, transparent background.
 
 ### Audio (optional, Version 3)
 Drop mp3s into `assets/audio/` matching the filenames in the
@@ -167,12 +171,12 @@ Everything tunable lives in `config.js`. Key groups:
 
 ## Known limitations (Version 1)
 
-- Raven movement uses a clip-path trick on the single hero painting rather
-  than true separately-painted state art. It looks right once calibrated,
-  but is inherently limited to *subtle* transforms — dramatic pose changes
-  would reveal the trick. This is by design (see art-direction brief) and
-  is superseded automatically the moment real cutout sprites are added.
-  This trick is not needed if using sprite images (see the sprite section above).
+- Real cutout raven sprites are in place (`assets/raven/raven-*.png`), so the
+  app runs in true sprite-swap mode, not the clip-path trick — confirm this
+  in the debug log (`raven sprite assets found, using sprite mode`). The
+  clip-path approach (calibrated against `assets/backgrounds/hero.png`,
+  which is kept only as a reference/fallback) still exists as a graceful
+  fallback if sprite files are ever removed, but is not what's rendering now.
 - Weather and audio are wired but inert until you supply coordinates/samples
   — this is intentional scoping for Version 1, not a bug.
 - Day/night, cloud-darkening, wind-driven ruffle frequency, and lightning
