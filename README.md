@@ -56,7 +56,9 @@ The clips are plain MP4s — no alpha channel — shot against a flat black or
 white background (`key: 'black' | 'white'` per clip in
 `CONFIG.ravenVideos`). A WebGL fragment shader (`initRavenVideoGL()` in
 `app.js`) samples each video frame, measures how close each pixel is to the
-key colour, and fades it to transparent within a band
+key colour, and fades it to transparent within a band. Black-backed clips
+use max-channel RGB distance rather than luminance so their blue-black
+feathers remain opaque; white-backed clips use inverse luminance
 (`CONFIG.ravenVideoKeyThreshold`, split per key colour) — this runs on the
 GPU so it's cheap enough to do every frame, unlike an equivalent CPU canvas
 pixel loop. It also does an 8-tap "erode" pass (min alpha over neighbouring
@@ -69,19 +71,16 @@ the threshold *and* the erosion are tuned separately per colour rather than
 shared:
 
 **Known limitation 1 — dark shadow feathers (`blink`, `ruffle`,
-`look-viewer`):** the raven's own darkest shadow feathers are very close to
-literal black (`RGB(0,1,3)` measured directly from footage) — essentially
-the same colour as the black background being keyed out on those three
-clips. This shows as small transparent gaps *inside* the raven's silhouette
-(not at the edge), since a shadow pixel and a background pixel can be
-colour-identical at 8-bit precision — no threshold can fully separate two
-pixels with the same value. `ravenVideoKeyThreshold.black` is tuned as
-tight as the measured data allows (background here is a clean, noise-free
-literal `0,0,0`, so `low` sits right near zero) to protect as much shadow
-detail as possible, and `ravenVideoErodeRadius.black` is **0, deliberately
-— erosion would make this specific problem worse**, not better: it spreads
-any already-transparent shadow pixel's low alpha into its opaque neighbours
-too, growing the gaps instead of shrinking them. The white-keyed clips
+`look-viewer`):** pixels that are exactly black remain indistinguishable
+from the keyed background. The compositor deliberately uses the brightest
+RGB channel rather than luminance for these clips, however, so tinted
+near-black feather detail (including blue-black pixels such as `RGB(0,1,3)`)
+stays opaque instead of becoming semi-transparent and looking washed out.
+`ravenVideoKeyThreshold.black` is consequently tuned to only remove the
+clean, noise-free black background, and `ravenVideoErodeRadius.black` is
+**0, deliberately — erosion would spread any truly black transparent pixel
+into its opaque neighbours**, growing gaps instead of shrinking them. The
+white-keyed clips
 (`head-left`, `subtle`) don't have this problem — a dark bird against white
 has natural contrast. If this matters enough to fix properly, the real fix
 is regenerating the black-background clips against a higher-contrast
