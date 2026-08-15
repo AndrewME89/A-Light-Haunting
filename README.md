@@ -56,42 +56,49 @@ The clips are plain MP4s — no alpha channel — shot against a flat black or
 white background (`key: 'black' | 'white'` per clip in
 `CONFIG.ravenVideos`). A WebGL fragment shader (`initRavenVideoGL()` in
 `app.js`) samples each video frame, measures how close each pixel is to the
-key colour, and fades it to transparent within a narrow band
+key colour, and fades it to transparent within a band
 (`CONFIG.ravenVideoKeyThreshold`, split per key colour) — this runs on the
 GPU so it's cheap enough to do every frame, unlike an equivalent CPU canvas
-pixel loop. The shader also does a small 4-tap "erode" pass (min alpha over
-a few neighbouring pixels), which shrinks the opaque silhouette inward by a
-couple of texels — this trades a very slightly thinner raven edge for
-eliminating the faint semi-transparent fringe that a single-sample key
-otherwise leaves at the silhouette boundary (visible as a light or dark
-"outline" around the bird — see the second bullet below).
+pixel loop. It also does an 8-tap "erode" pass (min alpha over neighbouring
+pixels, `CONFIG.ravenVideoErodeRadius`, also split per key colour — see
+why below), which shrinks the opaque silhouette inward, trading a thinner
+raven edge for removing a semi-transparent fringe at the boundary.
+
+The two colours fail in different, near-opposite ways, which is why both
+the threshold *and* the erosion are tuned separately per colour rather than
+shared:
 
 **Known limitation 1 — dark shadow feathers (`blink`, `ruffle`,
 `look-viewer`):** the raven's own darkest shadow feathers are very close to
 literal black (`RGB(0,1,3)` measured directly from footage) — essentially
 the same colour as the black background being keyed out on those three
-clips. This means those specific dark shadow areas can pick up faint, brief
-transparency. It's not a code bug; the source footage has almost no
-contrast between "raven in shadow" and "background" in those clips. The
-threshold is kept tight specifically to minimize this, at the cost of
-occasionally leaving a sliver of true-black background unkeyed at a body
-edge. The white-keyed clips (`head-left`, `subtle`) don't have this
-particular problem — a dark bird against white has natural contrast. If
-this matters enough to fix properly, the real fix is regenerating the
-black-background clips against a higher-contrast background (e.g. a
-saturated green/blue), not a code change.
+clips. This shows as small transparent gaps *inside* the raven's silhouette
+(not at the edge), since a shadow pixel and a background pixel can be
+colour-identical at 8-bit precision — no threshold can fully separate two
+pixels with the same value. `ravenVideoKeyThreshold.black` is tuned as
+tight as the measured data allows (background here is a clean, noise-free
+literal `0,0,0`, so `low` sits right near zero) to protect as much shadow
+detail as possible, and `ravenVideoErodeRadius.black` is **0, deliberately
+— erosion would make this specific problem worse**, not better: it spreads
+any already-transparent shadow pixel's low alpha into its opaque neighbours
+too, growing the gaps instead of shrinking them. The white-keyed clips
+(`head-left`, `subtle`) don't have this problem — a dark bird against white
+has natural contrast. If this matters enough to fix properly, the real fix
+is regenerating the black-background clips against a higher-contrast
+background (e.g. a saturated green/blue), not a code change.
 
-**Known limitation 2 — edge fringe / "outline" (all clips, most visible on
-the white-keyed ones):** video compression blends a few pixels of
-background into the raven's silhouette edge, which a naive single-sample
-key can leave as a faint halo around the whole bird. The erode pass above
-targets this directly, and the white threshold is deliberately generous
-(there's a lot of safe margin — the raven is dark, the background is
-white, so widening the "count as background" band doesn't risk eating into
-the bird). If this is still visible after a hard refresh, the next lever to
-pull is widening `CONFIG.ravenVideoKeyThreshold` further and/or increasing
-the `1.5` texel multiplier in the erode pass in `app.js` (search
-`uTexelSize * 1.5`) for a stronger erode radius.
+**Known limitation 2 — edge fringe / "outline" (most visible on the
+white-keyed clips):** video compression blends a few pixels of background
+into the raven's silhouette *edge*, which a naive single-sample key can
+leave as a faint halo around the whole bird — the opposite failure mode
+from limitation 1 (a boundary problem, not an interior one), which is why
+it's fixed with the opposite tool: `ravenVideoErodeRadius.white` is set
+fairly strong (`2.5` texels, 8-directional), and
+`ravenVideoKeyThreshold.white` is deliberately generous — there's a lot of
+safe margin between a dark bird and a white background, so widening the
+"count as background" band doesn't risk eating into the bird. If a fringe
+is still visible after a hard refresh, both numbers can go further —
+there's substantially more headroom before any risk to the raven itself.
 
 ### Watermark crop
 

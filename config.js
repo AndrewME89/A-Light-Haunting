@@ -122,17 +122,36 @@ const CONFIG = {
   // of the key colour fade to transparent (smoothstep between the two
   // values). Split per key colour because the safe margin is very
   // different for each:
-  //  - black: the raven's own darkest shadow feathers measure almost
-  //    identical to the black background (RGB ~0,1,3) in this footage, so
-  //    this must stay tight even though it leaves a little background
-  //    noise unkeyed at body edges — see the shadow-feather note above.
+  //  - black: the background measures as literal (0,0,0) with no
+  //    compression noise, so `low` can sit right near zero — this
+  //    protects as much of the raven's dark shadow detail as possible
+  //    while still fully clearing the flat background. There's a hard
+  //    floor here: a handful of the raven's own darkest pixels measure
+  //    RGB(0,1,3), which is indistinguishable from background at 8-bit
+  //    precision — no threshold can separate those, only regenerating the
+  //    footage against a higher-contrast background can.
   //  - white: a dark bird against a white background has huge natural
   //    contrast, so this can be much more generous — wide enough to
   //    reliably clear near-white (not just pure-white) background pixels
-  //    from video compression, with no risk to the (dark) raven.
+  //    and compression fringe, with no risk to the (dark) raven.
   ravenVideoKeyThreshold: {
-    black: { low: 0.01, high: 0.05 },
-    white: { low: 0.08, high: 0.22 }
+    black: { low: 0.002, high: 0.025 },
+    white: { low: 0.12, high: 0.30 }
+  },
+
+  // Erosion radius (in texels) for the edge-fringe cleanup pass — shrinks
+  // the opaque silhouette inward by roughly this many pixels. Also split
+  // per key colour, and for the opposite reason from the threshold split:
+  //  - white: erosion is the fix for edge fringe (compression blending a
+  //    few background pixels into the silhouette boundary), so this is
+  //    deliberately strong.
+  //  - black: erosion does NOT help the interior shadow-collision problem
+  //    above — it would actively spread those already-fragile dark spots
+  //    outward by eroding the alpha they'd otherwise inherit from
+  //    neighbouring opaque pixels. Kept at 0 (off) for that reason.
+  ravenVideoErodeRadius: {
+    black: 0,
+    white: 2.5
   },
 
   // ---------------------------------------------------------------------

@@ -198,15 +198,18 @@
   // (where two of the source clips have a burned-in tool watermark)
   // fully transparent regardless of colour.
   //
-  // alphaAt() is sampled at the pixel plus four small neighbour offsets,
-  // taking the minimum — an "erode" pass that shrinks the opaque raven
-  // silhouette inward by a couple of texels. Video compression blends a
-  // few pixels of background into the raven's edge (and vice versa),
-  // which a single-sample key leaves as a faint, semi-transparent fringe
-  // around the whole silhouette — visible as a light/dark "outline"
+  // alphaAt() is sampled at the pixel plus eight small neighbour offsets
+  // (4 cardinal + 4 diagonal), taking the minimum — an "erode" pass that
+  // shrinks the opaque raven silhouette inward by uErodeRadius texels.
+  // Video compression blends a few pixels of background into the raven's
+  // edge, which a single-sample key leaves as a faint, semi-transparent
+  // fringe around the whole silhouette — visible as a light "outline"
   // against the cemetery. Eroding treats any pixel near a background
-  // pixel as background too, which trades a very slightly thinner raven
-  // edge for removing that halo.
+  // pixel as background too, trading a thinner raven edge for removing
+  // that halo. uErodeRadius is 0 for the black-keyed clips (see
+  // CONFIG.ravenVideoErodeRadius for why) — at 0 every extra tap samples
+  // the same texel as the centre, so this is a correct no-op, not just an
+  // approximation.
   const FRAGMENT_SRC = `
     precision mediump float;
     varying vec2 vBaseUV;
@@ -218,6 +221,7 @@
     uniform float uKeyHigh;
     uniform vec2 uWatermarkCrop;
     uniform vec2 uTexelSize;
+    uniform float uErodeRadius;
 
     float alphaAt(vec2 uv) {
       vec3 c = texture2D(uVideo, uv).rgb;
@@ -231,11 +235,15 @@
       vec4 color = texture2D(uVideo, uv);
 
       float alpha = alphaAt(uv);
-      vec2 o = uTexelSize * 1.5;
-      alpha = min(alpha, alphaAt(uv + vec2(o.x, 0.0)));
-      alpha = min(alpha, alphaAt(uv - vec2(o.x, 0.0)));
-      alpha = min(alpha, alphaAt(uv + vec2(0.0, o.y)));
-      alpha = min(alpha, alphaAt(uv - vec2(0.0, o.y)));
+      vec2 o = uTexelSize * uErodeRadius;
+      alpha = min(alpha, alphaAt(uv + vec2( o.x,  0.0)));
+      alpha = min(alpha, alphaAt(uv + vec2(-o.x,  0.0)));
+      alpha = min(alpha, alphaAt(uv + vec2( 0.0,  o.y)));
+      alpha = min(alpha, alphaAt(uv + vec2( 0.0, -o.y)));
+      alpha = min(alpha, alphaAt(uv + vec2( o.x,  o.y)));
+      alpha = min(alpha, alphaAt(uv + vec2(-o.x,  o.y)));
+      alpha = min(alpha, alphaAt(uv + vec2( o.x, -o.y)));
+      alpha = min(alpha, alphaAt(uv + vec2(-o.x, -o.y)));
 
       // uWatermarkCrop.y is authored as "fraction down from the top" (the
       // usual image convention), but uv.y here runs bottom-up (GL
@@ -304,6 +312,7 @@
     glUniforms.uKeyHigh = gl.getUniformLocation(glProgram, 'uKeyHigh');
     glUniforms.uWatermarkCrop = gl.getUniformLocation(glProgram, 'uWatermarkCrop');
     glUniforms.uTexelSize = gl.getUniformLocation(glProgram, 'uTexelSize');
+    glUniforms.uErodeRadius = gl.getUniformLocation(glProgram, 'uErodeRadius');
 
     gl.uniform2f(glUniforms.uWatermarkCrop, CONFIG.ravenVideoWatermarkCrop.x, CONFIG.ravenVideoWatermarkCrop.y);
 
@@ -376,11 +385,13 @@
       const uv = computeCoverUV(el.videoWidth, el.videoHeight, ravenVideoCanvas.clientWidth, ravenVideoCanvas.clientHeight);
 
       const threshold = CONFIG.ravenVideoKeyThreshold[cfg.key] || CONFIG.ravenVideoKeyThreshold.black;
+      const erodeRadius = CONFIG.ravenVideoErodeRadius[cfg.key] ?? 0;
       gl.useProgram(glProgram);
       gl.uniform1f(glUniforms.uKeyMode, cfg.key === 'white' ? 1 : 0);
       gl.uniform1f(glUniforms.uKeyLow, threshold.low);
       gl.uniform1f(glUniforms.uKeyHigh, threshold.high);
       gl.uniform2f(glUniforms.uTexelSize, 1 / el.videoWidth, 1 / el.videoHeight);
+      gl.uniform1f(glUniforms.uErodeRadius, erodeRadius);
 
       ravenBaseEl.classList.add('raven-base-hidden');
       ravenVideoCanvas.classList.add('raven-video-active');
