@@ -132,7 +132,7 @@ const CONFIG = {
   //    from video compression, with no risk to the (dark) raven.
   ravenVideoKeyThreshold: {
     black: { low: 0.01, high: 0.05 },
-    white: { low: 0.06, high: 0.14 }
+    white: { low: 0.08, high: 0.22 }
   },
 
   // ---------------------------------------------------------------------

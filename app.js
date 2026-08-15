@@ -197,6 +197,16 @@
   // dark/light raven pixels. uWatermarkCrop forces the bottom-right corner
   // (where two of the source clips have a burned-in tool watermark)
   // fully transparent regardless of colour.
+  //
+  // alphaAt() is sampled at the pixel plus four small neighbour offsets,
+  // taking the minimum — an "erode" pass that shrinks the opaque raven
+  // silhouette inward by a couple of texels. Video compression blends a
+  // few pixels of background into the raven's edge (and vice versa),
+  // which a single-sample key leaves as a faint, semi-transparent fringe
+  // around the whole silhouette — visible as a light/dark "outline"
+  // against the cemetery. Eroding treats any pixel near a background
+  // pixel as background too, which trades a very slightly thinner raven
+  // edge for removing that halo.
   const FRAGMENT_SRC = `
     precision mediump float;
     varying vec2 vBaseUV;
@@ -207,12 +217,26 @@
     uniform float uKeyLow;
     uniform float uKeyHigh;
     uniform vec2 uWatermarkCrop;
+    uniform vec2 uTexelSize;
+
+    float alphaAt(vec2 uv) {
+      vec3 c = texture2D(uVideo, uv).rgb;
+      float lum = dot(c, vec3(0.299, 0.587, 0.114));
+      float dist = uKeyMode < 0.5 ? lum : (1.0 - lum);
+      return smoothstep(uKeyLow, uKeyHigh, dist);
+    }
+
     void main() {
       vec2 uv = vBaseUV * uUVScale + uUVOffset;
       vec4 color = texture2D(uVideo, uv);
-      float lum = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-      float dist = uKeyMode < 0.5 ? lum : (1.0 - lum);
-      float alpha = smoothstep(uKeyLow, uKeyHigh, dist);
+
+      float alpha = alphaAt(uv);
+      vec2 o = uTexelSize * 1.5;
+      alpha = min(alpha, alphaAt(uv + vec2(o.x, 0.0)));
+      alpha = min(alpha, alphaAt(uv - vec2(o.x, 0.0)));
+      alpha = min(alpha, alphaAt(uv + vec2(0.0, o.y)));
+      alpha = min(alpha, alphaAt(uv - vec2(0.0, o.y)));
+
       // uWatermarkCrop.y is authored as "fraction down from the top" (the
       // usual image convention), but uv.y here runs bottom-up (GL
       // convention), so the bottom-right corner is uv.x high / uv.y LOW.
@@ -279,6 +303,7 @@
     glUniforms.uKeyLow = gl.getUniformLocation(glProgram, 'uKeyLow');
     glUniforms.uKeyHigh = gl.getUniformLocation(glProgram, 'uKeyHigh');
     glUniforms.uWatermarkCrop = gl.getUniformLocation(glProgram, 'uWatermarkCrop');
+    glUniforms.uTexelSize = gl.getUniformLocation(glProgram, 'uTexelSize');
 
     gl.uniform2f(glUniforms.uWatermarkCrop, CONFIG.ravenVideoWatermarkCrop.x, CONFIG.ravenVideoWatermarkCrop.y);
 
@@ -355,6 +380,7 @@
       gl.uniform1f(glUniforms.uKeyMode, cfg.key === 'white' ? 1 : 0);
       gl.uniform1f(glUniforms.uKeyLow, threshold.low);
       gl.uniform1f(glUniforms.uKeyHigh, threshold.high);
+      gl.uniform2f(glUniforms.uTexelSize, 1 / el.videoWidth, 1 / el.videoHeight);
 
       ravenBaseEl.classList.add('raven-base-hidden');
       ravenVideoCanvas.classList.add('raven-video-active');

@@ -50,30 +50,48 @@ gesture now reads as a brief cutaway shot of the raven doing something,
 rather than the near-instant flicker earlier procedural versions used.
 That's a real change in feel worth knowing about, not just a timing tweak.
 
-### Why a shader, and its one real limitation
+### Why a shader, and its known limitations
 
 The clips are plain MP4s — no alpha channel — shot against a flat black or
 white background (`key: 'black' | 'white'` per clip in
 `CONFIG.ravenVideos`). A WebGL fragment shader (`initRavenVideoGL()` in
 `app.js`) samples each video frame, measures how close each pixel is to the
 key colour, and fades it to transparent within a narrow band
-(`CONFIG.ravenVideoKeyThreshold`) — this runs on the GPU so it's cheap
-enough to do every frame, unlike an equivalent CPU canvas pixel loop.
+(`CONFIG.ravenVideoKeyThreshold`, split per key colour) — this runs on the
+GPU so it's cheap enough to do every frame, unlike an equivalent CPU canvas
+pixel loop. The shader also does a small 4-tap "erode" pass (min alpha over
+a few neighbouring pixels), which shrinks the opaque silhouette inward by a
+couple of texels — this trades a very slightly thinner raven edge for
+eliminating the faint semi-transparent fringe that a single-sample key
+otherwise leaves at the silhouette boundary (visible as a light or dark
+"outline" around the bird — see the second bullet below).
 
-**Known limitation:** on the *black-keyed* clips (`blink`, `ruffle`,
-`look-viewer`), the raven's own darkest shadow feathers are very close to
+**Known limitation 1 — dark shadow feathers (`blink`, `ruffle`,
+`look-viewer`):** the raven's own darkest shadow feathers are very close to
 literal black (`RGB(0,1,3)` measured directly from footage) — essentially
-the same colour as the background being keyed out. This means those
-specific dark shadow areas can pick up faint, brief transparency during
-those three gestures. It's not a code bug; the source footage has almost no
+the same colour as the black background being keyed out on those three
+clips. This means those specific dark shadow areas can pick up faint, brief
+transparency. It's not a code bug; the source footage has almost no
 contrast between "raven in shadow" and "background" in those clips. The
 threshold is kept tight specifically to minimize this, at the cost of
 occasionally leaving a sliver of true-black background unkeyed at a body
-edge. The white-keyed clips (`head-left`, `subtle`) don't have this problem
-— a dark bird against white has natural contrast. If this matters enough to
-fix properly, the real fix is regenerating the black-background clips
-against a higher-contrast background (e.g. a saturated green/blue), not a
-code change.
+edge. The white-keyed clips (`head-left`, `subtle`) don't have this
+particular problem — a dark bird against white has natural contrast. If
+this matters enough to fix properly, the real fix is regenerating the
+black-background clips against a higher-contrast background (e.g. a
+saturated green/blue), not a code change.
+
+**Known limitation 2 — edge fringe / "outline" (all clips, most visible on
+the white-keyed ones):** video compression blends a few pixels of
+background into the raven's silhouette edge, which a naive single-sample
+key can leave as a faint halo around the whole bird. The erode pass above
+targets this directly, and the white threshold is deliberately generous
+(there's a lot of safe margin — the raven is dark, the background is
+white, so widening the "count as background" band doesn't risk eating into
+the bird). If this is still visible after a hard refresh, the next lever to
+pull is widening `CONFIG.ravenVideoKeyThreshold` further and/or increasing
+the `1.5` texel multiplier in the erode pass in `app.js` (search
+`uTexelSize * 1.5`) for a stronger erode radius.
 
 ### Watermark crop
 
@@ -266,9 +284,13 @@ Everything tunable lives in `config.js`. Key groups:
 ## Known limitations
 
 - **Dark-feather keying artifact** on the black-keyed clips (`blink`,
-  `ruffle`, `look-viewer`) — see "Why a shader, and its one real
-  limitation" above. Not fixable in code without regenerating that footage
-  against a higher-contrast background.
+  `ruffle`, `look-viewer`) — see "Why a shader, and its known limitations"
+  above. Not fixable in code without regenerating that footage against a
+  higher-contrast background.
+- **Edge fringe/"outline" around the raven** — mitigated with an erode
+  pass and a wider white-key threshold, but not necessarily eliminated on
+  every clip/frame. See "Known limitation 2" above for what to try next if
+  it's still visible after a hard refresh.
 - **Gestures are now ~5–6 seconds each** (the clips' native length), not
   the near-instant flicker of earlier procedural versions. This is an
   intentional trade-off from switching to real video — reconsider if it
