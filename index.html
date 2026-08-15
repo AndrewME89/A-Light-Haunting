@@ -1,34 +1,59 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="theme-color" content="#050608">
-  <title>The Raven Portrait</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Raven Portrait</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main id="portrait" class="portrait" aria-label="A raven watching over a moonlit Victorian cemetery">
-    <div class="scene-drift">
-      <div class="layer cemetery" aria-hidden="true"></div>
-      <div class="layer vignette" aria-hidden="true"></div>
-      <div class="moon-haze" aria-hidden="true"></div>
-      <div id="raven" class="raven raven--normal" aria-hidden="true">
-        <img id="raven-image" src="assets/raven/normal.svg" alt="">
-      </div>
-      <div class="foreground" aria-hidden="true"></div>
-      <div class="grain" aria-hidden="true"></div>
+  <div id="stage">
+    <div id="scene">
+      <!-- 1. Cemetery background + raven, single painted hero scene -->
+      <div class="layer layer-hero" id="layer-hero"></div>
+
+      <!-- Optional sprite-mode raven (used automatically if cutout PNGs exist) -->
+      <img id="raven-sprite" class="layer layer-raven-sprite" alt="" draggable="false" hidden />
+
+      <!-- Clip-path mode raven overlay (used when no sprite assets are present) -->
+      <div class="layer layer-raven-overlay" id="layer-raven-overlay"></div>
+      <div class="layer layer-blink" id="layer-blink"></div>
+
+      <!-- 2. Day/night colour treatment -->
+      <div class="layer layer-daynight" id="layer-daynight"></div>
+
+      <!-- 3. Cloud / darkness treatment -->
+      <div class="layer layer-clouds" id="layer-clouds"></div>
+
+      <!-- 4. Fog -->
+      <div class="layer layer-fog layer-fog-far" id="layer-fog-far"></div>
+      <div class="layer layer-fog layer-fog-near" id="layer-fog-near"></div>
+
+      <!-- 7. Rain -->
+      <canvas class="layer layer-rain" id="layer-rain"></canvas>
+
+      <!-- 8. Lightning -->
+      <div class="layer layer-lightning" id="layer-lightning"></div>
+
+      <!-- 9. Foreground framing / vignette -->
+      <div class="layer layer-vignette"></div>
     </div>
-    <aside id="debug-panel" class="debug-panel" hidden>
-      <strong>Portrait workshop</strong>
-      <button data-action="blink">Blink <kbd>B</kbd></button>
-      <button data-action="ruffle">Ruffle <kbd>R</kbd></button>
-      <button data-action="head-left">Look left <kbd>←</kbd></button>
-      <button data-action="head-right">Look right <kbd>→</kbd></button>
-      <button data-action="normal">Still <kbd>N</kbd></button>
-    </aside>
-  </main>
+  </div>
+
+  <div id="debug-panel" hidden>
+    <div id="debug-title">DEBUG</div>
+    <div id="debug-log"></div>
+    <div class="debug-hint">
+      b=blink r=ruffle h=head-turn l=lightning<br />
+      1=rain 2=fog 3=night 4=storm 0=reset<br />
+      a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY<br />
+      c=calibration click-mode &nbsp; d=hide panel
+    </div>
+  </div>
+
   <script src="config.js"></script>
+  <script src="weather.js"></script>
+  <script src="audio.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
