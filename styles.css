@@ -1,25 +1,278 @@
-:root { color-scheme: dark; background: #030405; }
-* { box-sizing: border-box; }
-html, body, .portrait { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-body { background: #020304; cursor: none; font-family: Georgia, serif; }
-.portrait { position: relative; isolation: isolate; }
-.scene-drift { position: absolute; inset: -4px; overflow: hidden; animation: drift 24min ease-in-out infinite alternate; }
-.layer { position: absolute; inset: 0; }
-.cemetery { background: #101418 url('assets/backgrounds/cemetery.svg') center/cover no-repeat; transform: scale(1.008); }
-.vignette { z-index: 5; background: radial-gradient(ellipse at 52% 42%, transparent 20%, rgba(2,3,4,.12) 57%, rgba(0,0,0,.84) 100%), linear-gradient(180deg, rgba(9,14,19,.05), rgba(4,5,7,.36)); box-shadow: inset 0 0 11vw #000; }
-.moon-haze { position: absolute; z-index: 1; width: 31vw; height: 31vw; left: 7%; top: -9%; border-radius: 50%; background: radial-gradient(circle, rgba(178,191,194,.12), transparent 66%); filter: blur(20px); }
-.raven { position: absolute; z-index: 3; width: min(50vw, 76vh); height: min(78vh, 48vw); left: 50%; bottom: 4.5%; transform: translateX(-45%); filter: drop-shadow(1.2vw 1.6vw 1.5vw rgba(0,0,0,.72)); }
-.raven img { width: 100%; height: 100%; object-fit: contain; object-position: center bottom; }
-.raven--ruffle-1, .raven--ruffle-2 { transform: translateX(-45%) scale(1.004); }
-.foreground { position: absolute; z-index: 4; inset: auto -4% -5% -4%; height: 25%; background: url('assets/backgrounds/foreground.svg') center bottom/cover no-repeat; opacity: .94; }
-.grain { position: absolute; z-index: 6; inset: 0; pointer-events: none; opacity: .15; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E"); mix-blend-mode: soft-light; }
-.debug-panel { cursor: auto; position: fixed; z-index: 20; right: 18px; bottom: 18px; width: 190px; padding: 12px; border: 1px solid #6b6570; background: rgba(8,8,10,.92); box-shadow: 0 10px 30px #000; }
-.debug-panel strong { display: block; margin-bottom: 8px; color: #c2b4cf; }
-.debug-panel button { display: flex; justify-content: space-between; width: 100%; margin: 5px 0; padding: 7px; color: #ddd7cf; border: 1px solid #454149; background: #17151a; font: inherit; }
-kbd { color: #9f8cab; }
-[data-portrait-state='sleep'] .scene-drift { filter: brightness(.3) saturate(.5); }
-[data-portrait-state='away'] .scene-drift { filter: brightness(.55); }
-[data-portrait-state='idle'] .scene-drift { filter: brightness(.8); }
-.no-drift .scene-drift { animation: none; }
-@keyframes drift { 0% { transform: translate3d(-1px,-1px,0) scale(1.002); } 50% { transform: translate3d(1px,0,0) scale(1.003); } 100% { transform: translate3d(0,2px,0) scale(1.002); } }
-@media (prefers-reduced-motion: reduce) { .scene-drift { animation: none; } }
+/* Haunted Raven Portrait — styling & layer compositing
+   Design principle: the default state must look like a still painting.
+   Every animation below is intentionally small and slow. */
+
+:root {
+  --scene-w: 1920;
+  --scene-h: 1080;
+  --drift-px: 2px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  cursor: none;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+/* 16:9 letterboxed scene, centred and scaled to fill without distortion */
+#scene {
+  position: relative;
+  width: 100vw;
+  height: 56.25vw; /* 16:9 */
+  max-height: 100vh;
+  max-width: 177.78vh; /* 16:9 */
+  overflow: hidden;
+  background: #000;
+  will-change: transform;
+}
+
+#scene.burn-in-drift {
+  animation: burnInDrift calc(var(--burn-in-minutes, 14) * 60s) ease-in-out infinite;
+}
+
+@keyframes burnInDrift {
+  0%   { transform: translate(0, 0); }
+  20%  { transform: translate(var(--drift-px), calc(var(--drift-px) * -1)); }
+  40%  { transform: translate(calc(var(--drift-px) * -1), 0); }
+  60%  { transform: translate(0, var(--drift-px)); }
+  80%  { transform: translate(calc(var(--drift-px) * -0.5), calc(var(--drift-px) * 0.5)); }
+  100% { transform: translate(0, 0); }
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- */
+/* 1. Hero painted scene                                            */
+/* ---------------------------------------------------------------- */
+.layer-hero {
+  background-image: var(--hero-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: 1;
+  transition: filter 6s ease;
+}
+
+/* ---------------------------------------------------------------- */
+/* Raven — clip-path mode (default, used when no cutout PNGs exist) */
+/* ---------------------------------------------------------------- */
+.layer-raven-overlay {
+  background-image: var(--hero-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: 3;
+  clip-path: var(--raven-clip, none);
+  transform: translate(0, 0) rotate(0deg) scale(1);
+  transform-origin: var(--head-anchor-x, 44%) var(--head-anchor-y, 28%);
+  transition: transform 900ms cubic-bezier(.33,.66,.4,1), filter 700ms ease;
+  filter: brightness(1);
+}
+
+.raven-headL  { transform: translate(-0.35%, -0.15%) rotate(-1.1deg) scale(1.002); }
+.raven-headR  { transform: translate(0.35%, -0.1%) rotate(1.1deg) scale(1.002); }
+.raven-ruffle1{ transform: translate(0, 0.1%) scale(1.006, 0.992) rotate(-0.3deg); filter: brightness(1.03); }
+.raven-ruffle2{ transform: translate(0, -0.05%) scale(0.994, 1.008) rotate(0.3deg); filter: brightness(0.98); }
+
+/* Eye patch used to fake a blink over the clip-path raven */
+.layer-blink {
+  z-index: 4;
+  left: calc(var(--eye-x, 46.5%) - var(--eye-w, 5%) / 2);
+  top: calc(var(--eye-y, 18.5%) - var(--eye-h, 3.2%) / 2);
+  width: var(--eye-w, 5%);
+  height: var(--eye-h, 3.2%);
+  inset: auto;
+  border-radius: 50% / 45%;
+  background: radial-gradient(ellipse at center,
+    rgba(6,7,10,0.96) 0%, rgba(6,7,10,0.9) 55%, rgba(6,7,10,0) 100%);
+  opacity: 0;
+  filter: blur(0.5px);
+}
+
+.layer-blink.blink-active {
+  opacity: 1;
+  transition: opacity 55ms ease-in;
+}
+.layer-blink.blink-closing {
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+}
+
+/* ---------------------------------------------------------------- */
+/* Raven — sprite mode (used automatically if assets/raven/*.png load) */
+/* ---------------------------------------------------------------- */
+.layer-raven-sprite {
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.layer-raven-sprite.sprite-visible { opacity: 1; }
+
+/* ---------------------------------------------------------------- */
+/* 2 & 3. Day/night + cloud darkness                                 */
+/* ---------------------------------------------------------------- */
+.layer-daynight {
+  z-index: 5;
+  background: linear-gradient(180deg, rgba(10,14,26,0) 0%, rgba(10,14,26,0) 100%);
+  mix-blend-mode: multiply;
+  opacity: 0;
+  transition: opacity 8s ease, background 8s ease;
+}
+.layer-daynight.is-night {
+  opacity: 1;
+  background: linear-gradient(180deg, rgba(10,18,38,0.55) 0%, rgba(6,10,22,0.72) 100%);
+}
+
+.layer-clouds {
+  z-index: 6;
+  background: rgba(20,22,28,0);
+  mix-blend-mode: multiply;
+  opacity: 0;
+  transition: opacity 10s ease;
+}
+.layer-clouds.is-overcast {
+  opacity: 1;
+  background: rgba(24,26,32,0.35);
+}
+
+/* ---------------------------------------------------------------- */
+/* 4. Fog                                                            */
+/* ---------------------------------------------------------------- */
+.layer-fog {
+  z-index: 7;
+  background-repeat: repeat-x;
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 4s ease;
+}
+.layer-fog-far {
+  bottom: 0;
+  top: 55%;
+  height: 45%;
+  background-image: radial-gradient(ellipse at 20% 100%, rgba(200,205,215,0.5), transparent 60%),
+                     radial-gradient(ellipse at 70% 100%, rgba(200,205,215,0.4), transparent 55%),
+                     radial-gradient(ellipse at 40% 100%, rgba(200,205,215,0.45), transparent 65%);
+  filter: blur(6px);
+}
+.layer-fog-near {
+  bottom: 0;
+  top: 72%;
+  height: 28%;
+  background-image: radial-gradient(ellipse at 10% 100%, rgba(210,214,222,0.55), transparent 55%),
+                     radial-gradient(ellipse at 55% 100%, rgba(210,214,222,0.5), transparent 60%),
+                     radial-gradient(ellipse at 90% 100%, rgba(210,214,222,0.45), transparent 55%);
+  filter: blur(3px);
+}
+.layer-fog.fog-on {
+  opacity: var(--fog-intensity, 0.5);
+  animation: fogDrift 140s linear infinite;
+}
+.layer-fog-near.fog-on {
+  animation-duration: 95s;
+}
+@keyframes fogDrift {
+  0%   { background-position: 0% 0%; }
+  100% { background-position: -200% 0%; }
+}
+
+/* ---------------------------------------------------------------- */
+/* 7. Rain                                                           */
+/* ---------------------------------------------------------------- */
+.layer-rain {
+  z-index: 8;
+  opacity: 0;
+  transition: opacity 2.5s ease;
+}
+.layer-rain.rain-on { opacity: 1; }
+
+/* ---------------------------------------------------------------- */
+/* 8. Lightning                                                      */
+/* ---------------------------------------------------------------- */
+.layer-lightning {
+  z-index: 9;
+  background: radial-gradient(ellipse at 50% 15%, rgba(220,228,255,0.9), rgba(220,228,255,0.15) 55%, transparent 75%);
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+.layer-lightning.flash-weak { animation: lightningWeak 260ms ease-out; }
+.layer-lightning.flash-strong { animation: lightningStrong 420ms ease-out; }
+
+@keyframes lightningWeak {
+  0% { opacity: 0; }
+  8% { opacity: 0.35; }
+  20% { opacity: 0.05; }
+  100% { opacity: 0; }
+}
+@keyframes lightningStrong {
+  0% { opacity: 0; }
+  6% { opacity: 0.85; }
+  14% { opacity: 0.1; }
+  22% { opacity: 0.6; }
+  40% { opacity: 0.05; }
+  100% { opacity: 0; }
+}
+
+/* ---------------------------------------------------------------- */
+/* 9. Foreground vignette — sells the "framed painting" feel        */
+/* ---------------------------------------------------------------- */
+.layer-vignette {
+  z-index: 10;
+  background: radial-gradient(ellipse at center,
+    rgba(0,0,0,0) 55%, rgba(0,0,0,0.28) 85%, rgba(0,0,0,0.55) 100%);
+  box-shadow: inset 0 0 14vmin rgba(0,0,0,0.55);
+}
+
+/* ---------------------------------------------------------------- */
+/* Debug panel                                                       */
+/* ---------------------------------------------------------------- */
+#debug-panel {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 1000;
+  background: rgba(0,0,0,0.72);
+  color: #b9c2d0;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 14px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  max-width: 320px;
+  cursor: default;
+}
+#debug-title {
+  color: #e8b4b8;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+.debug-hint { margin-top: 6px; opacity: 0.75; }
+#debug-log { white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow-y: auto; }
