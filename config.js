@@ -118,24 +118,24 @@ const CONFIG = {
   // colour, cropping the watermark out of the visible composite.
   ravenVideoWatermarkCrop: { x: 0.83, y: 0.80 },
 
-  // Luma-key softness: pixels within this normalized luminance distance
-  // of the key colour fade to transparent (smoothstep between the two
-  // values). Split per key colour because the safe margin is very
+  // Key softness: pixels within this normalized distance of the key colour
+  // fade to transparent (smoothstep between the two values). Black distance
+  // uses the brightest RGB channel; white distance uses inverse luminance.
+  // Split per key colour because the safe margin is very
   // different for each:
   //  - black: the background measures as literal (0,0,0) with no
   //    compression noise, so `low` can sit right near zero — this
-  //    protects as much of the raven's dark shadow detail as possible
-  //    while still fully clearing the flat background. There's a hard
-  //    floor here: a handful of the raven's own darkest pixels measure
-  //    RGB(0,1,3), which is indistinguishable from background at 8-bit
-  //    precision — no threshold can separate those, only regenerating the
+  //    while still fully clearing the flat background. Max-channel
+  //    distance also keeps blue-black feather pixels such as
+  //    RGB(0,1,3) opaque instead of turning them semi-transparent and
+  //    washing them out against the brighter cemetery.
   //    footage against a higher-contrast background can.
   //  - white: a dark bird against a white background has huge natural
   //    contrast, so this can be much more generous — wide enough to
   //    reliably clear near-white (not just pure-white) background pixels
   //    and compression fringe, with no risk to the (dark) raven.
   ravenVideoKeyThreshold: {
-    black: { low: 0.002, high: 0.025 },
+    black: { low: 0.001, high: 0.008 },
     white: { low: 0.12, high: 0.30 }
   },
 
