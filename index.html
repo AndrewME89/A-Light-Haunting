@@ -9,25 +9,32 @@
 <body>
   <div id="stage">
     <div id="scene">
-      <!-- 1. Cemetery background + raven, single painted hero scene -->
+      <!-- 1. Cemetery background, raven removed (production base layer) -->
       <div class="layer layer-hero" id="layer-hero"></div>
 
-      <!-- Optional sprite-mode raven (used automatically if cutout PNGs exist) -->
-      <img id="raven-sprite" class="layer layer-raven-sprite" alt="" draggable="false" hidden />
+      <!-- 2. Far fog — painted overlay, sits behind the raven -->
+      <div class="layer layer-fog layer-fog-far" id="layer-fog-far"></div>
 
-      <!-- Clip-path mode raven overlay (used when no sprite assets are present) -->
-      <div class="layer layer-raven-overlay" id="layer-raven-overlay"></div>
-      <div class="layer layer-blink" id="layer-blink"></div>
+      <!-- 3. Raven sprite renderer — two stacked layers crossfade between
+           pose states so transitions never hard-swap. Production mode. -->
+      <div class="layer layer-raven" id="layer-raven">
+        <img class="raven-frame" id="raven-layer-a" alt="" draggable="false" />
+        <img class="raven-frame" id="raven-layer-b" alt="" draggable="false" />
+      </div>
 
-      <!-- 2. Day/night colour treatment -->
+      <!-- 3b. Clip-path raven — fallback only, used if raven-normal.png
+           fails to load. Hidden entirely in production sprite mode. -->
+      <div class="layer layer-raven-overlay" id="layer-raven-overlay" hidden></div>
+      <div class="layer layer-blink" id="layer-blink" hidden></div>
+
+      <!-- 4. Near fog — painted overlay, passes in front of the raven -->
+      <div class="layer layer-fog layer-fog-near" id="layer-fog-near"></div>
+
+      <!-- 5. Day/night colour treatment -->
       <div class="layer layer-daynight" id="layer-daynight"></div>
 
-      <!-- 3. Cloud / darkness treatment -->
+      <!-- 6. Cloud / overcast darkness treatment -->
       <div class="layer layer-clouds" id="layer-clouds"></div>
-
-      <!-- 4. Fog -->
-      <div class="layer layer-fog layer-fog-far" id="layer-fog-far"></div>
-      <div class="layer layer-fog layer-fog-near" id="layer-fog-near"></div>
 
       <!-- 7. Rain -->
       <canvas class="layer layer-rain" id="layer-rain"></canvas>
@@ -44,7 +51,7 @@
     <div id="debug-title">DEBUG</div>
     <div id="debug-log"></div>
     <div class="debug-hint">
-      b=blink r=ruffle h=head-turn l=lightning<br />
+      b=blink r=ruffle h=head-turn v=look-at-viewer l=lightning<br />
       1=rain 2=fog 3=night 4=storm 0=reset<br />
       a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY<br />
       c=calibration click-mode &nbsp; d=hide panel

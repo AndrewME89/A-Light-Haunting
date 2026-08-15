@@ -5,31 +5,57 @@
  */
 const CONFIG = {
   // ---------------------------------------------------------------------
-  // Location & weather (wired up in Version 2 — safe to leave populated
-  // now, the app will simply never call the weather API until v2 code
-  // is added to weather.js).
+  // Location & weather — safe to leave null, the app simply never calls
+  // the weather API until these are set.
   // ---------------------------------------------------------------------
   latitude: null,
   longitude: null,
   weatherUpdateMinutes: 5,
 
   // ---------------------------------------------------------------------
-  // Raven behaviour timing (Version 1)
+  // Raven behaviour timing
   // ---------------------------------------------------------------------
   blinkMinSeconds: 20,
   blinkMaxSeconds: 120,
-  blinkDurationMinMs: 100,
-  blinkDurationMaxMs: 250,
+  // Eyelid-closed hold duration (not counting the crossfade in/out below).
+  blinkDurationMinMs: 90,
+  blinkDurationMaxMs: 180,
   doubleBlinkChance: 0.1,          // chance a blink is followed by a second, quick blink
   doubleBlinkPauseMs: 220,
+  // Blink must read as an eyelid, not a dissolve — keep these fast.
+  blinkFadeInMinMs: 50,
+  blinkFadeInMaxMs: 90,
+  blinkFadeOutMinMs: 60,
+  blinkFadeOutMaxMs: 110,
 
   ruffleMinMinutes: 4,
   ruffleMaxMinutes: 20,
+  // Crossfade duration between each ruffle frame (normal→r1→r2→r1→normal).
+  ruffleFrameFadeMinMs: 120,
+  ruffleFrameFadeMaxMs: 180,
 
   headMoveMinMinutes: 10,
   headMoveMaxMinutes: 40,
   headMoveHoldMinMs: 1400,
   headMoveHoldMaxMs: 3200,
+  headMoveFadeInMinMs: 180,
+  headMoveFadeInMaxMs: 250,
+  headMoveFadeOutMinMs: 220,
+  headMoveFadeOutMaxMs: 320,
+
+  // "Look at viewer" — deliberately rare, on its own independent
+  // scheduler so it never gets mixed in with ordinary head-turn odds.
+  lookViewerMinMinutes: 60,
+  lookViewerMaxMinutes: 180,
+  // Chance a scheduled attempt is skipped outright (just reschedules),
+  // so real-world gaps of many hours are common.
+  lookViewerSkipChance: 0.3,
+  lookViewerHoldMinMs: 1500,
+  lookViewerHoldMaxMs: 3000,
+  lookViewerFadeInMinMs: 220,
+  lookViewerFadeInMaxMs: 300,
+  lookViewerFadeOutMinMs: 260,
+  lookViewerFadeOutMaxMs: 360,
 
   // Occasionally skip a scheduled event entirely and roll a much longer
   // wait instead, so the viewer can never learn the rhythm.
@@ -37,8 +63,7 @@ const CONFIG = {
   longQuietPeriodMultiplier: 3,
 
   // ---------------------------------------------------------------------
-  // Audio (Version 3 — module present, disabled by default until real
-  // samples are dropped into assets/audio/)
+  // Audio (inert until CONFIG.audioEnabled + real samples in assets/audio/)
   // ---------------------------------------------------------------------
   audioEnabled: false,
   audioVolume: 0.2,
@@ -47,8 +72,8 @@ const CONFIG = {
   longSilenceChance: 0.15,
 
   // ---------------------------------------------------------------------
-  // Weather visuals (Version 2 — layers exist now and are drivable from
-  // the debug panel; real weather will call the same setters in v2)
+  // Weather visuals — layers exist and are drivable from the debug panel
+  // and from weather.js once latitude/longitude are set.
   // ---------------------------------------------------------------------
   lightningEnabled: true,
 
@@ -65,18 +90,16 @@ const CONFIG = {
   debug: true,
 
   // ---------------------------------------------------------------------
-  // Assets
+  // Assets — production renderer
   // ---------------------------------------------------------------------
-  // Background-only cemetery scene (raven cleanly removed). Used as the
-  // static base layer under the raven sprite. NOTE: assets/backgrounds/hero.png
-  // (raven baked in) is kept only as a reference/fallback for clip-path mode —
-  // it must NOT be used as heroImage while real raven sprites exist, or the
-  // baked-in raven would "ghost" behind the moving sprite during animations.
+  // Background-only cemetery scene (raven cleanly removed). This is the
+  // base layer under the raven sprite in production.
   heroImage: 'assets/backgrounds/cemetery-background.png',
 
-  // assets/raven/raven-normal.png (and friends) exist and load successfully,
-  // so the app automatically uses true sprite-swap mode instead of the
-  // clip-path trick below. See README "Asset replacement".
+  // assets/raven/raven-normal.png (and friends) are the finished, aligned
+  // transparent-PNG animation states. When raven-normal.png loads
+  // successfully at boot, the app uses true sprite crossfade rendering.
+  // See README "Asset replacement".
   ravenSpriteMode: {
     normal: 'assets/raven/raven-normal.png',
     blink: 'assets/raven/raven-blink.png',
@@ -87,14 +110,21 @@ const CONFIG = {
     lookViewer: 'assets/raven/raven-look-viewer.png'
   },
 
-  // --- Clip-path calibration (used only while sprite assets are absent) ---
-  // Normalized (0–1) polygon roughly outlining the raven within heroImage,
-  // expressed as CSS clip-path percentages. Tune with the calibration tool:
-  // enable debug mode, press "c", click around the raven's silhouette, and
-  // read the logged percentages from the console.
-  // Calibrated by eye against assets/backgrounds/hero.png. Re-run the
-  // calibration tool (debug mode, press "c") if you swap in a different
-  // painting or crop.
+  // Painted fog overlays (real artwork, not CSS gradients). Missing files
+  // are detected gracefully — that layer just stays inactive.
+  fogFarImage: 'assets/weather/fog-far.png',
+  fogNearImage: 'assets/weather/fog-near.png',
+
+  // --- Clip-path fallback (only used if raven-normal.png fails to load) ---
+  // This mode needs a background that still has the raven painted into it,
+  // which cemetery-background.png (above) deliberately does not. hero.png
+  // is kept specifically for this fallback — do not point heroImage at it.
+  heroFallbackImage: 'assets/backgrounds/hero.png',
+
+  // Normalized (0–1) polygon roughly outlining the raven within
+  // heroFallbackImage, expressed as CSS clip-path percentages. Tune with
+  // the calibration tool: enable debug mode, press "c", click around the
+  // raven's silhouette, and read the logged percentages from the console.
   ravenClipPath: [
     '44% 8%', '58% 20%', '54% 24%', '52% 29%', '56% 40%',
     '54% 58%', '46% 74%', '35% 92%', '11% 89%', '14% 68%',
@@ -111,8 +141,8 @@ const CONFIG = {
   eyeSize: { width: 0.035, height: 0.028 },
 
   // ---------------------------------------------------------------------
-  // Portrait state (Version 4 hook — v1 only ever uses ACTIVE, but the
-  // state machine and external-event listener are live now so future
+  // Portrait state (external-integration hook — v1 only ever uses ACTIVE,
+  // but the state machine and event listener are live now so future
   // integrations have something to talk to).
   // ---------------------------------------------------------------------
   portraitState: 'ACTIVE'

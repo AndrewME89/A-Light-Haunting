@@ -1,6 +1,10 @@
 /* Haunted Raven Portrait — styling & layer compositing
    Design principle: the default state must look like a still painting.
-   Every animation below is intentionally small and slow. */
+   Every animation below is intentionally small and slow.
+
+   Layer order (back to front):
+     1 cemetery background   2 far fog   3 raven sprites   4 near fog
+     5 day/night   6 clouds/overcast   7 rain   8 lightning   9 vignette */
 
 :root {
   --scene-w: 1920;
@@ -66,10 +70,10 @@ html, body {
 }
 
 /* ---------------------------------------------------------------- */
-/* 1. Hero painted scene                                            */
+/* 1. Cemetery background (production: raven-free)                  */
 /* ---------------------------------------------------------------- */
 .layer-hero {
-  background-image: var(--hero-image, none);
+  background-image: var(--bg-image, none);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -78,10 +82,31 @@ html, body {
 }
 
 /* ---------------------------------------------------------------- */
-/* Raven — clip-path mode (default, used when no cutout PNGs exist) */
+/* 3. Raven — production sprite renderer (two-layer crossfade)      */
+/* ---------------------------------------------------------------- */
+.layer-raven {
+  z-index: 3;
+}
+
+.raven-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 150ms linear;
+  will-change: opacity;
+}
+.raven-frame.raven-frame-visible {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- */
+/* 3b. Raven — clip-path fallback (only if sprite PNGs fail to load) */
 /* ---------------------------------------------------------------- */
 .layer-raven-overlay {
-  background-image: var(--hero-image, none);
+  background-image: var(--clip-hero-image, none);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -93,14 +118,16 @@ html, body {
   filter: brightness(1);
 }
 
+.raven-fast-transition { transition-duration: 260ms; }
 .raven-headL  { transform: translate(-0.35%, -0.15%) rotate(-1.1deg) scale(1.002); }
 .raven-headR  { transform: translate(0.35%, -0.1%) rotate(1.1deg) scale(1.002); }
+.raven-headF  { transform: scale(1.004); filter: brightness(1.02); }
 .raven-ruffle1{ transform: translate(0, 0.1%) scale(1.006, 0.992) rotate(-0.3deg); filter: brightness(1.03); }
 .raven-ruffle2{ transform: translate(0, -0.05%) scale(0.994, 1.008) rotate(0.3deg); filter: brightness(0.98); }
 
-/* Eye patch used to fake a blink over the clip-path raven */
+/* Eye patch used to fake a blink over the clip-path raven (fallback only) */
 .layer-blink {
-  z-index: 4;
+  z-index: 3;
   left: calc(var(--eye-x, 46.5%) - var(--eye-w, 5%) / 2);
   top: calc(var(--eye-y, 18.5%) - var(--eye-h, 3.2%) / 2);
   width: var(--eye-w, 5%);
@@ -123,20 +150,55 @@ html, body {
 }
 
 /* ---------------------------------------------------------------- */
-/* Raven — sprite mode (used automatically if assets/raven/*.png load) */
+/* 2 & 4. Fog — real painted overlays, extremely slow parallax drift */
 /* ---------------------------------------------------------------- */
-.layer-raven-sprite {
-  z-index: 3;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.layer-fog {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   opacity: 0;
-  transition: opacity 260ms ease;
+  transition: opacity 5s ease;
+  will-change: transform, opacity;
 }
-.layer-raven-sprite.sprite-visible { opacity: 1; }
+.layer-fog-far {
+  z-index: 2;
+  background-image: var(--fog-far-image, none);
+}
+.layer-fog-near {
+  z-index: 4;
+  background-image: var(--fog-near-image, none);
+}
+.layer-fog.fog-on {
+  opacity: var(--fog-intensity, 0.5);
+  animation: fogDriftFar 200s ease-in-out infinite alternate;
+}
+.layer-fog-near.fog-on {
+  animation-name: fogDriftNear;
+  animation-duration: 260s;
+}
+/* Small, slow parallax — never a scrolling/tiling texture. Direction
+   reverses smoothly via `alternate` rather than jumping back to start. */
+@keyframes fogDriftFar {
+  0%   { transform: translate(0, 0); }
+  100% { transform: translate(13px, 5px); }
+}
+@keyframes fogDriftNear {
+  0%   { transform: translate(0, 0); }
+  100% { transform: translate(-10px, 4px); }
+}
 
 /* ---------------------------------------------------------------- */
-/* 2 & 3. Day/night + cloud darkness                                 */
+/* 7. Rain                                                           */
+/* ---------------------------------------------------------------- */
+.layer-rain {
+  z-index: 7;
+  opacity: 0;
+  transition: opacity 2.5s ease;
+}
+.layer-rain.rain-on { opacity: 1; }
+
+/* ---------------------------------------------------------------- */
+/* 5. Day/night + 6. cloud/overcast darkness                         */
 /* ---------------------------------------------------------------- */
 .layer-daynight {
   z-index: 5;
@@ -163,60 +225,10 @@ html, body {
 }
 
 /* ---------------------------------------------------------------- */
-/* 4. Fog                                                            */
-/* ---------------------------------------------------------------- */
-.layer-fog {
-  z-index: 7;
-  background-repeat: repeat-x;
-  background-size: 200% 100%;
-  opacity: 0;
-  transition: opacity 4s ease;
-}
-.layer-fog-far {
-  bottom: 0;
-  top: 55%;
-  height: 45%;
-  background-image: radial-gradient(ellipse at 20% 100%, rgba(200,205,215,0.5), transparent 60%),
-                     radial-gradient(ellipse at 70% 100%, rgba(200,205,215,0.4), transparent 55%),
-                     radial-gradient(ellipse at 40% 100%, rgba(200,205,215,0.45), transparent 65%);
-  filter: blur(6px);
-}
-.layer-fog-near {
-  bottom: 0;
-  top: 72%;
-  height: 28%;
-  background-image: radial-gradient(ellipse at 10% 100%, rgba(210,214,222,0.55), transparent 55%),
-                     radial-gradient(ellipse at 55% 100%, rgba(210,214,222,0.5), transparent 60%),
-                     radial-gradient(ellipse at 90% 100%, rgba(210,214,222,0.45), transparent 55%);
-  filter: blur(3px);
-}
-.layer-fog.fog-on {
-  opacity: var(--fog-intensity, 0.5);
-  animation: fogDrift 140s linear infinite;
-}
-.layer-fog-near.fog-on {
-  animation-duration: 95s;
-}
-@keyframes fogDrift {
-  0%   { background-position: 0% 0%; }
-  100% { background-position: -200% 0%; }
-}
-
-/* ---------------------------------------------------------------- */
-/* 7. Rain                                                           */
-/* ---------------------------------------------------------------- */
-.layer-rain {
-  z-index: 8;
-  opacity: 0;
-  transition: opacity 2.5s ease;
-}
-.layer-rain.rain-on { opacity: 1; }
-
-/* ---------------------------------------------------------------- */
 /* 8. Lightning                                                      */
 /* ---------------------------------------------------------------- */
 .layer-lightning {
-  z-index: 9;
+  z-index: 8;
   background: radial-gradient(ellipse at 50% 15%, rgba(220,228,255,0.9), rgba(220,228,255,0.15) 55%, transparent 75%);
   opacity: 0;
   mix-blend-mode: screen;
@@ -243,7 +255,7 @@ html, body {
 /* 9. Foreground vignette — sells the "framed painting" feel        */
 /* ---------------------------------------------------------------- */
 .layer-vignette {
-  z-index: 10;
+  z-index: 9;
   background: radial-gradient(ellipse at center,
     rgba(0,0,0,0) 55%, rgba(0,0,0,0.28) 85%, rgba(0,0,0,0.55) 100%);
   box-shadow: inset 0 0 14vmin rgba(0,0,0,0.55);
