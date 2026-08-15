@@ -236,8 +236,7 @@
     log('head move:', direction);
     const holdMs = randInt(CONFIG.headMoveHoldMinMs, CONFIG.headMoveHoldMaxMs);
     if (ravenMode === 'sprite') {
-      const key = direction === 'left' ? 'headLeft' : direction === 'right' ? 'headRight' : 'lookViewer';
-      setSprite(key);
+      setSprite(direction === 'left' ? 'headLeft' : direction === 'right' ? 'headRight' : 'normal');
       await wait(holdMs);
       setSprite('normal');
       return;
