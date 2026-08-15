@@ -18,69 +18,70 @@ assets/backgrounds/cemetery-background.png   (raven-free base)
         ↓
 assets/weather/fog-far.png                   (painted, behind the raven)
         ↓
-raven sprite renderer (assets/raven/raven-*.png, two-layer crossfade)
+raven (assets/raven/raven-normal.png — one image, animated procedurally)
         ↓
 assets/weather/fog-near.png                  (painted, in front of the raven)
         ↓
 day/night → cloud/overcast → rain → lightning → vignette
 ```
 
-The raven is **not** a clipped fragment of a bigger painting — it's a set of
-aligned, transparent-PNG animation states (`assets/raven/raven-normal.png`,
-`raven-blink.png`, `raven-ruffle-01.png`, `raven-ruffle-02.png`,
-`raven-head-left.png`, `raven-head-right.png`, `raven-look-viewer.png`), all
-preloaded at boot and crossfaded between on a two-layer `<img>` stack so pose
-changes never hard-swap. See "How the raven renders" below.
+There is **no pose-swap art**. The raven is a single isolated, transparent
+cutout, pixel-aligned to the same canvas as the background. Every behaviour
+— blink, feather ruffle, head-turn, look-at-viewer — is produced
+procedurally in CSS/SVG on top of that one image. See "How the raven
+animates" below.
 
 Fog is real painted artwork, not a CSS gradient — see "Fog".
 
-A **clip-path fallback** still exists for resilience (isolates the raven
-region from `assets/backgrounds/hero.png`, the original painting with the
-raven baked in, via CSS clip-path). It only engages automatically if
-`raven-normal.png` fails to load, and is not what renders in production.
+## How the raven animates
 
-## How the raven renders
+At boot, `app.js` preloads `raven-normal.png`. If it fails to load, the
+scene just shows the cemetery with no raven (logged as a warning) rather
+than breaking. If it loads, three independent techniques animate it —
+nothing ever swaps to a different image:
 
-At boot, `app.js` preloads `raven-normal.png`. If it loads:
+**Blink** — a small dark eyelid-shaped overlay (`#raven-blink`) fades in
+over the eye, holds, fades out. Positioned via `CONFIG.eyePosition`/
+`eyeSize`.
 
-1. All other states (`blink`, `ruffle1`, `ruffle2`, `headLeft`, `headRight`,
-   `lookViewer`) are preloaded too. Any individual missing file falls back
-   to `normal` and logs a debug warning — it never breaks the page.
-2. The renderer switches to **sprite mode** — confirm this in the debug log
-   (`renderer: SPRITE`).
-3. The clip-path fallback layers are hidden entirely. There is only ever one
-   raven on screen.
+**Feather ruffle** — an SVG filter (`feTurbulence` + `feDisplacementMap`,
+defined in `index.html`) is applied to a *second copy* of the raven image
+that's clipped to just the body/wing/tail region (`CONFIG.ruffleClipPath`)
+— the head/beak/eye are outside that clip, so they never distort. The
+filter's displacement is tweened up and back down by `app.js` over one
+continuous gesture (`ruffleDurationMinMs`/`MaxMs`), not discrete frames, and
+a fresh turbulence seed is picked each time so no two ruffles look
+identical. The filter is only attached to the DOM while active
+(`.ruffle-active`), so it costs nothing the rest of the time.
 
-Pose changes use a **two-layer crossfade** (`#raven-layer-a` /
-`#raven-layer-b`): the incoming pose fades in on the hidden layer while the
-current one fades out, both over the same duration, so the raven's body
-(identical, pixel-aligned pixels in every state) stays visually still —
-only the changed feature transitions. Durations are state-specific and
-randomized within a range each time, matching the "never learnable" timing
-philosophy:
+**Head-turn / look-at-viewer** — a subtle CSS `transform` (translate +
+rotate + scale, a couple px/degrees at most) on the whole raven rig,
+pivoting around `CONFIG.headAnchor`. Because there's only one flat image,
+this can't show a genuinely different angle — it reads as a small,
+plausible settling motion, not a real turn. That's an intentional
+trade-off for a smoother, cleaner-feeling animation over more dramatic but
+harder-swapped poses.
+
+Durations are randomized within a range each time, matching the "never
+learnable" timing philosophy:
 
 | Event | Transition | Hold |
 |---|---|---|
 | Blink | 50–90ms in, 60–110ms out | 90–180ms closed |
-| Feather ruffle | 120–180ms per frame (normal→r1→r2→r1→normal) | — |
+| Feather ruffle | one 500–750ms gesture (ramp up, ramp down) | — |
 | Head left/right | 180–250ms in, 220–320ms out | 1.4–3.2s |
 | Look at viewer | 220–300ms in, 260–360ms out | 1.5–3s |
 
-If `raven-normal.png` is missing, the app falls back to the clip-path
-approach against `assets/backgrounds/hero.png` instead — see "Calibrating
-the clip-path fallback" below. This path is a safety net, not something you
-need to touch with the finished artwork in place.
-
 ## "Look at viewer" — a deliberately rare event
 
-`raven-look-viewer.png` is wired to its **own independent scheduler**, not
-folded into ordinary head-turns, so it stays rare enough to be unsettling
-rather than recognizable:
+Wired to its **own independent scheduler**, not folded into ordinary
+head-turns, so it stays rare enough to be unsettling rather than
+recognizable:
 
 - fires roughly every 60–180 minutes (`lookViewerMinMinutes`/`MaxMinutes`)
 - has a 30% chance (`lookViewerSkipChance`) of skipping a scheduled attempt
   outright and just rescheduling, so real gaps of many hours are common
-- plays: `normal → lookViewer → hold ~1.5–3s → normal`
+- plays: `normal → look-viewer transform → hold ~1.5–3s → normal`
 
 Debug key `v` triggers it immediately for testing — this does not affect
 production rarity, since it calls the same function the scheduler calls
@@ -98,7 +99,7 @@ No build step, no server framework required.
    # or: python -m http.server 8080
    ```
 3. Open it in a browser. You should see the cemetery scene fill the screen,
-   with exactly one raven, no baked-in duplicate.
+   with exactly one raven.
 4. With `debug: true`, a small panel appears bottom-left. Keyboard shortcuts:
 
    | Key | Effect |
@@ -114,11 +115,11 @@ No build step, no server framework required.
    | `4` | toggle full storm mode (rain + overcast + night + recurring lightning) |
    | `0` | reset all weather visuals |
    | `a` / `i` / `s` / `w` | set portrait state to ACTIVE / IDLE / SLEEP / AWAY |
-   | `c` | toggle calibration click-mode (clip-path fallback only, see below) |
+   | `c` | toggle calibration click-mode (see below) |
    | `d` | hide/show the debug panel |
 
-   The debug log also prints the active renderer, the current raven pose,
-   any missing sprite/fog assets, and weather state as it updates.
+   The debug log also prints whether the raven image loaded, missing
+   fog/background assets, and weather state as it updates.
 
 5. When you're happy, set `debug: false` in `config.js` before deploying —
    the panel and all keyboard shortcuts disappear entirely.
@@ -134,24 +135,27 @@ direction smoothly over 3–4.5 minutes per leg) — enough to read as
 atmosphere, never as an animation layer. If `fog-near.png` is ever removed,
 that layer just stays inactive gracefully; the far layer still works alone.
 
-## Calibrating the clip-path fallback
+## Calibrating the raven
 
-This only matters if `raven-normal.png` ever fails to load and the app
-drops into the fallback renderer. With the finished sprite art in place,
-you shouldn't need this section.
+`CONFIG.ruffleClipPath`, `headAnchor`, `eyePosition`, and `eyeSize` are all
+pre-calibrated against the current `raven-normal.png`. You'd only need to
+redo this if you swap in a different raven image or the composition
+changes:
 
 1. Set `debug: true`, reload, press `c` to enter calibration mode.
-2. Click around the raven's outline in the scene, roughly a dozen points.
-   Each click logs a `'NN.N% NN.N%',` line to the debug panel/console.
-3. Copy those lines into `CONFIG.ravenClipPath` in `config.js` (in order,
-   forming a closed polygon).
+2. Click around the body/wing/tail outline (excluding the head), roughly
+   8–10 points. Each click logs a `'NN.N% NN.N%',` line to the debug
+   panel/console.
+3. Copy those lines into `CONFIG.ruffleClipPath` in `config.js` (in order,
+   forming a closed polygon around just the feathered body).
 4. Click once on the neck/shoulder junction (where the head should pivot)
    and copy that into `CONFIG.headAnchor` as `{ x, y }` (divide the logged
    percentages by 100).
 5. Click the center of the raven's visible eye for `CONFIG.eyePosition`, and
    adjust `CONFIG.eyeSize` (width/height, 0–1 fractions of the scene) until
    the blink patch sits neatly over it.
-6. Press `b`/`r`/`h` to preview blink/ruffle/head-turn and refine.
+6. Press `b`/`r`/`h`/`v` to preview blink/ruffle/head-turn/look-viewer and
+   refine.
 
 ## Replacing assets
 
@@ -159,29 +163,18 @@ you shouldn't need this section.
 `assets/backgrounds/cemetery-background.png` — the raven-free cemetery
 scene. Update `CONFIG.heroImage` if you rename or relocate it.
 
-### Raven sprite states (required for production rendering)
-Already in place in `assets/raven/`:
+### Raven (required)
+`assets/raven/raven-normal.png` — the one raven image, transparent PNG at
+the same 1672×941 canvas as the background, pixel-aligned. Update
+`CONFIG.ravenImage` if you rename or relocate it, and re-run the
+calibration steps above if the pose/composition changed.
 
-```
-raven-normal.png
-raven-blink.png
-raven-ruffle-01.png
-raven-ruffle-02.png
-raven-head-left.png
-raven-head-right.png
-raven-look-viewer.png   ← rare "look at viewer" event, see above
-```
-
-Each is a transparent PNG at the same 1672×941 canvas as the background, so
-it overlays pixel-aligned. The app **auto-detects** `raven-normal.png` at
-boot; since it loads successfully, sprite crossfade rendering is active. To
-replace any individual state, overwrite that file — same filename, same
-canvas size, transparent background.
-
-`assets/backgrounds/hero.png` (raven baked into the full painting) is kept
-only as the source for the clip-path fallback — it is deliberately **not**
-used as the production background, since that would leave a static duplicate
-raven visible underneath the animated sprite.
+`assets/backgrounds/hero.png` (the original painting with the raven baked
+in) and the other pose PNGs previously used for sprite-swap rendering
+(`raven-blink.png`, `raven-ruffle-01/02.png`, `raven-head-left/right.png`,
+`raven-look-viewer.png`) are **not used by the current renderer** — nothing
+in the code references them. They're left in the repo rather than deleted
+in case you want to reference them later; safe to ignore.
 
 ### Fog (optional, graceful if missing)
 `assets/weather/fog-far.png` / `assets/weather/fog-near.png` — see "Fog"
@@ -214,8 +207,15 @@ Everything tunable lives in `config.js`. Key groups:
   unlearnable) and `lookViewerSkipChance` (same idea, specific to the rare
   look-at-viewer event).
 - **Transition speeds** — `blinkFadeIn/OutMin/MaxMs`,
-  `ruffleFrameFadeMin/MaxMs`, `headMoveFadeIn/OutMin/MaxMs`,
-  `lookViewerFadeIn/OutMin/MaxMs` — how long each crossfade takes.
+  `headMoveFadeIn/OutMin/MaxMs`, `lookViewerFadeIn/OutMin/MaxMs` — how long
+  each fade/transform transition takes.
+- **Ruffle filter** — `ruffleDurationMin/MaxMs` (length of the one
+  turbulence gesture), `ruffleDisplacementScale` (peak px displacement —
+  keep small, this should read as a shiver not a warp),
+  `ruffleTurbulenceFrequency` (SVG `feTurbulence` baseFrequency — higher is
+  finer/tighter ripples).
+- **Calibration** — `ruffleClipPath`, `headAnchor`, `eyePosition`,
+  `eyeSize` — see "Calibrating the raven" above.
 - **Audio** — off by default; see above.
 - **Display safety** — `burnInProtection`, `burnInCycleMinutes`,
   `burnInDriftPixels` (keep this tiny — 1–3px — it must stay imperceptible).
@@ -246,26 +246,29 @@ Everything tunable lives in `config.js`. Key groups:
    - memory creep over very long uptimes — restart the Silk tab
      periodically (e.g. nightly) if you observe slowdown; this is a
      reasonable cron/automation task for a future version.
+   - **SVG filters** (the ruffle effect) are more GPU-dependent than plain
+     opacity/transform — it's only attached to the DOM for the ~0.5–0.75s
+     the ruffle is active, but if Silk on your specific Fire TV generation
+     struggles with it, lowering `ruffleDisplacementScale` reduces the
+     rendering cost proportionally.
 7. If Silk proves unreliable for continuous multi-day operation, the same
    HTML/CSS/JS can be packaged as a lightweight Fire TV HTML5 app instead —
    no rewrite needed, just a packaging step.
-8. **Not yet soak-tested on a physical Fire TV Stick** — the renderer
-   changes in this pass (two-layer crossfade, painted fog, independent
-   look-viewer scheduler) were verified in a desktop browser. Recommended
-   before relying on it: a multi-hour run on the actual device to confirm
-   Silk doesn't throttle/suspend the crossfade transitions or the fog drift
-   animation.
+8. **Not yet soak-tested on a physical Fire TV Stick** — verified in a
+   desktop browser only so far. Recommended before relying on it: a
+   multi-hour run on the actual device, paying particular attention to the
+   SVG ruffle filter and the fog drift animation.
 
 ## Known limitations
 
-- The clip-path fallback (`assets/backgrounds/hero.png` + CSS clip-path)
-  only exists as a safety net for a broken/missing sprite deploy. With the
-  finished art in place it should never engage — if your debug log ever
-  shows `renderer: CLIP` instead of `renderer: SPRITE`, something is wrong
-  with the `assets/raven/raven-*.png` files, not the app logic.
-- Old `.svg` placeholder raven/background files remain under `assets/` from
-  an earlier prototype pass. Nothing in the code references them; they're
-  inert and safe to ignore (or delete later if you want to tidy the repo).
+- Head-turn and look-at-viewer are subtle transforms, not a real change of
+  angle — this is an inherent limit of animating one flat image rather than
+  a trade-off you can tune away. If a true angle change matters later,
+  that needs new art (a second photographed/painted angle), not more code.
+- Old `.svg` placeholder files and the unused sprite-pose PNGs remain under
+  `assets/` from earlier iterations. Nothing in the code references them;
+  they're inert and safe to ignore (or delete later if you want to tidy
+  the repo).
 - Weather and audio are wired but inert until you supply coordinates/samples
   — this is intentional, not a bug.
 - Day/night, cloud-darkening, wind-driven ruffle frequency, and lightning
@@ -280,24 +283,19 @@ Everything tunable lives in `config.js`. Key groups:
 
 ```
 A-Light-Haunting/
-├── index.html
+├── index.html       ← includes the SVG feTurbulence/feDisplacementMap filter defs
 ├── styles.css
-├── config.js       ← all tunable values
-├── app.js           ← core scene/behaviour engine + sprite renderer
-├── weather.js        ← Open-Meteo integration, inert until lat/long set
-├── audio.js           ← raven sample playback, inert until audioEnabled + samples
+├── config.js         ← all tunable values
+├── app.js             ← core scene/behaviour engine + procedural raven animation
+├── weather.js          ← Open-Meteo integration, inert until lat/long set
+├── audio.js              ← raven sample playback, inert until audioEnabled + samples
 ├── assets/
 │   ├── backgrounds/
 │   │   ├── cemetery-background.png   ← production background (raven-free)
-│   │   └── hero.png                   ← clip-path fallback only (raven baked in)
+│   │   └── hero.png                   ← unused by current renderer, kept as reference
 │   ├── raven/
-│   │   ├── raven-normal.png
-│   │   ├── raven-blink.png
-│   │   ├── raven-ruffle-01.png
-│   │   ├── raven-ruffle-02.png
-│   │   ├── raven-head-left.png
-│   │   ├── raven-head-right.png
-│   │   └── raven-look-viewer.png
+│   │   ├── raven-normal.png            ← the only raven asset actually used
+│   │   └── (other raven-*.png/.svg)    ← unused, kept from earlier iterations
 │   ├── weather/
 │   │   ├── fog-far.png
 │   │   └── fog-near.png

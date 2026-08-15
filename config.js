@@ -17,7 +17,7 @@ const CONFIG = {
   // ---------------------------------------------------------------------
   blinkMinSeconds: 20,
   blinkMaxSeconds: 120,
-  // Eyelid-closed hold duration (not counting the crossfade in/out below).
+  // Eyelid-closed hold duration (not counting the fade in/out below).
   blinkDurationMinMs: 90,
   blinkDurationMaxMs: 180,
   doubleBlinkChance: 0.1,          // chance a blink is followed by a second, quick blink
@@ -30,14 +30,23 @@ const CONFIG = {
 
   ruffleMinMinutes: 4,
   ruffleMaxMinutes: 20,
-  // Crossfade duration between each ruffle frame (normal→r1→r2→r1→normal).
-  ruffleFrameFadeMinMs: 120,
-  ruffleFrameFadeMaxMs: 180,
+  // The ruffle is one continuous feather-turbulence gesture (ramp up then
+  // back down), not discrete frames — see "How the raven animates" in
+  // README. Total duration of that single gesture:
+  ruffleDurationMinMs: 500,
+  ruffleDurationMaxMs: 750,
+  // Max displacement (px) the turbulence filter pushes feather pixels at
+  // the peak of the gesture. Keep small — this should read as a shiver,
+  // not a warp.
+  ruffleDisplacementScale: 5,
+  // SVG feTurbulence baseFrequency ("x y"). Higher = finer/tighter ripples.
+  ruffleTurbulenceFrequency: '0.06 0.09',
 
   headMoveMinMinutes: 10,
   headMoveMaxMinutes: 40,
   headMoveHoldMinMs: 1400,
   headMoveHoldMaxMs: 3200,
+  // Transform transition duration turning into / back out of the pose.
   headMoveFadeInMinMs: 180,
   headMoveFadeInMaxMs: 250,
   headMoveFadeOutMinMs: 220,
@@ -90,53 +99,43 @@ const CONFIG = {
   debug: true,
 
   // ---------------------------------------------------------------------
-  // Assets — production renderer
+  // Assets
   // ---------------------------------------------------------------------
-  // Background-only cemetery scene (raven cleanly removed). This is the
-  // base layer under the raven sprite in production.
+  // Background-only cemetery scene (raven cleanly removed).
   heroImage: 'assets/backgrounds/cemetery-background.png',
 
-  // assets/raven/raven-normal.png (and friends) are the finished, aligned
-  // transparent-PNG animation states. When raven-normal.png loads
-  // successfully at boot, the app uses true sprite crossfade rendering.
-  // See README "Asset replacement".
-  ravenSpriteMode: {
-    normal: 'assets/raven/raven-normal.png',
-    blink: 'assets/raven/raven-blink.png',
-    ruffle1: 'assets/raven/raven-ruffle-01.png',
-    ruffle2: 'assets/raven/raven-ruffle-02.png',
-    headLeft: 'assets/raven/raven-head-left.png',
-    headRight: 'assets/raven/raven-head-right.png',
-    lookViewer: 'assets/raven/raven-look-viewer.png'
-  },
+  // Single isolated raven cutout (transparent PNG), pixel-aligned to the
+  // same 1672×941 canvas as heroImage. There is no separate pose art —
+  // every animation (blink, ruffle, head-move, look-viewer) is produced
+  // procedurally in CSS/SVG on top of this one image. See README
+  // "How the raven animates".
+  ravenImage: 'assets/raven/raven-normal.png',
 
   // Painted fog overlays (real artwork, not CSS gradients). Missing files
   // are detected gracefully — that layer just stays inactive.
   fogFarImage: 'assets/weather/fog-far.png',
   fogNearImage: 'assets/weather/fog-near.png',
 
-  // --- Clip-path fallback (only used if raven-normal.png fails to load) ---
-  // This mode needs a background that still has the raven painted into it,
-  // which cemetery-background.png (above) deliberately does not. hero.png
-  // is kept specifically for this fallback — do not point heroImage at it.
-  heroFallbackImage: 'assets/backgrounds/hero.png',
+  // --- Calibration (all normalized 0–1, expressed as CSS percentages,
+  // relative to the scene box — ravenImage already shares the scene's
+  // canvas alignment so no separate raven-local coordinate space is
+  // needed). Tune with the calibration tool: enable debug mode, press
+  // "c", click the scene, and read the logged percentages from the
+  // console. ---
 
-  // Normalized (0–1) polygon roughly outlining the raven within
-  // heroFallbackImage, expressed as CSS clip-path percentages. Tune with
-  // the calibration tool: enable debug mode, press "c", click around the
-  // raven's silhouette, and read the logged percentages from the console.
-  ravenClipPath: [
-    '44% 8%', '58% 20%', '54% 24%', '52% 29%', '56% 40%',
-    '54% 58%', '46% 74%', '35% 92%', '11% 89%', '14% 68%',
-    '20% 36%', '33% 12%'
+  // Polygon isolating just the body/wing/tail feathers — deliberately
+  // excludes the head/beak/eye, so the ruffle filter never distorts the
+  // face. Roughly "everything below the shoulder line".
+  ruffleClipPath: [
+    '52% 30%', '56% 40%', '54% 58%', '46% 74%', '35% 92%',
+    '11% 89%', '14% 68%', '20% 36%', '33% 30%'
   ],
 
-  // Anchor point (normalized 0–1) the raven's head pivots around for
-  // head-turn transforms — roughly where the neck meets the body.
+  // Anchor point the raven pivots around for head-turn transforms —
+  // roughly where the neck meets the body.
   headAnchor: { x: 0.5, y: 0.28 },
 
-  // Eye patch used for the blink illusion in clip-path mode. Normalized
-  // to the scene box. Tune these with the calibration tool.
+  // Eyelid-overlay placement for the blink illusion.
   eyePosition: { x: 0.458, y: 0.177 },
   eyeSize: { width: 0.035, height: 0.028 },
 

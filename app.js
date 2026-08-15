@@ -5,18 +5,20 @@
  *  - Everything timing-related uses recursive setTimeout with fresh random
  *    delays each time (never setInterval), so no two events share a phase
  *    and the viewer can't learn a rhythm.
- *  - The raven can run in two rendering modes, auto-detected at startup:
- *      "sprite" — production renderer. Real cutout PNGs (assets/raven/*.png),
- *                 preloaded at boot, crossfaded between on a two-layer
- *                 <img> stack so pose changes never hard-swap.
- *      "clip"   — fallback only, used if raven-normal.png fails to load.
- *                 Single painted image (assets/backgrounds/hero.png, raven
- *                 baked in) with a CSS clip-path isolating the raven region.
- *    Production art exists, so sprite mode is what actually renders; clip
- *    mode is a safety net, not the primary path.
+ *  - The raven is ONE isolated image (assets/raven/raven-normal.png,
+ *    pixel-aligned to the same canvas as the background). There is no
+ *    pose-swap art. Every behaviour is produced procedurally:
+ *      blink        — a small dark eyelid shape overlaid on the eye
+ *      ruffle       — an SVG feTurbulence/feDisplacementMap filter,
+ *                     applied only to a clipped body/wing/tail region so
+ *                     the head never distorts, tweened up and back down
+ *      head-move /
+ *      look-viewer  — a subtle CSS transform (translate/rotate/scale) on
+ *                     the whole raven rig
+ *    This avoids any hard image swap — the raven's body is always the
+ *    same pixels, so nothing can visibly "jump".
  *  - window.RavenPortrait is the public surface future modules (weather,
- *    audio, house integration) call into. Nothing outside app.js needs to
- *    know which raven render mode is active.
+ *    audio, house integration) call into.
  */
 
 (function () {
@@ -61,10 +63,11 @@
   const sceneEl = document.getElementById('scene');
   const heroEl = document.getElementById('layer-hero');
   const layerRavenEl = document.getElementById('layer-raven');
-  const ravenLayerA = document.getElementById('raven-layer-a');
-  const ravenLayerB = document.getElementById('raven-layer-b');
-  const ravenOverlayEl = document.getElementById('layer-raven-overlay');
-  const blinkEl = document.getElementById('layer-blink');
+  const ravenBaseEl = document.getElementById('raven-base');
+  const ravenRuffleLayerEl = document.getElementById('raven-ruffle-layer');
+  const ravenBlinkEl = document.getElementById('raven-blink');
+  const ruffleTurbulenceEl = document.getElementById('ruffleTurbulence');
+  const ruffleDisplacementEl = document.getElementById('ruffleDisplacementMap');
   const daynightEl = document.getElementById('layer-daynight');
   const cloudsEl = document.getElementById('layer-clouds');
   const fogFarEl = document.getElementById('layer-fog-far');
@@ -115,13 +118,10 @@
   });
 
   // ----------------------------------------------------------------
-  // Raven render mode detection + two-layer sprite crossfade renderer
+  // Raven — single isolated image, procedurally animated
   // ----------------------------------------------------------------
-  let ravenMode = 'clip';
-  const spriteCache = {};
-  const layerEls = { a: ravenLayerA, b: ravenLayerB };
-  let activeLayer = 'a';
-  let currentRavenKey = 'normal';
+  let ravenLoaded = false;
+  let currentGesture = 'normal'; // debug-only label, not a render mode
 
   function preloadImage(src) {
     return new Promise((resolve) => {
@@ -132,88 +132,29 @@
     });
   }
 
-  // Crossfades to `key` over `durationMs`. Both the incoming and outgoing
-  // layers animate opacity together over the same duration so the raven's
-  // body (identical, pixel-aligned pixels in every state) never appears to
-  // jump — only the changed feature (eye/feathers/head) visibly transitions.
-  function setRavenState(key, durationMs) {
-    if (ravenMode !== 'sprite') return Promise.resolve();
-    const targetSrc = spriteCache[key] || spriteCache.normal;
-    const fromEl = layerEls[activeLayer];
-    const toKey = activeLayer === 'a' ? 'b' : 'a';
-    const toEl = layerEls[toKey];
-    toEl.src = targetSrc;
-    toEl.style.transitionDuration = durationMs + 'ms';
-    fromEl.style.transitionDuration = durationMs + 'ms';
-    requestAnimationFrame(() => {
-      toEl.classList.add('raven-frame-visible');
-      fromEl.classList.remove('raven-frame-visible');
-    });
-    activeLayer = toKey;
-    currentRavenKey = key;
-    log('raven state ->', key, `(${durationMs}ms)`);
-    return wait(durationMs);
-  }
-
-  async function detectRavenMode() {
-    const normalOk = await preloadImage(CONFIG.ravenSpriteMode.normal);
-    if (!normalOk) {
-      ravenMode = 'clip';
-      log('raven-normal.png not found at', CONFIG.ravenSpriteMode.normal, '— falling back to clip-path renderer');
-      await initClipFallback();
-      log('renderer: CLIP (fallback)');
+  async function initRaven() {
+    const loaded = await preloadImage(CONFIG.ravenImage);
+    if (!loaded) {
+      log('WARNING: raven image failed to load at', CONFIG.ravenImage, '— scene will show the cemetery with no raven');
+      log('renderer: MISSING');
       return;
     }
-
-    spriteCache.normal = CONFIG.ravenSpriteMode.normal;
-    const optionalKeys = Object.keys(CONFIG.ravenSpriteMode).filter(k => k !== 'normal');
-    await Promise.all(optionalKeys.map(async (key) => {
-      const ok = await preloadImage(CONFIG.ravenSpriteMode[key]);
-      if (ok) {
-        spriteCache[key] = CONFIG.ravenSpriteMode[key];
-      } else {
-        spriteCache[key] = spriteCache.normal;
-        log('WARNING: missing raven sprite state "' + key + '" (' + CONFIG.ravenSpriteMode[key] + ') — falling back to normal');
-      }
-    }));
-
-    ravenMode = 'sprite';
-    ravenLayerA.src = spriteCache.normal;
-    ravenLayerA.classList.add('raven-frame-visible');
-    activeLayer = 'a';
-    currentRavenKey = 'normal';
-
-    // Hide the clip-path fallback entirely — there must never be a second
-    // raven visible underneath the active sprite.
-    ravenOverlayEl.hidden = true;
-    blinkEl.hidden = true;
-    layerRavenEl.hidden = false;
-
-    log('raven sprite assets detected — using production sprite renderer');
-    log('renderer: SPRITE');
-  }
-
-  async function initClipFallback() {
-    const loaded = await preloadImage(CONFIG.heroFallbackImage);
-    if (loaded) {
-      sceneEl.style.setProperty('--clip-hero-image', `url("${CONFIG.heroFallbackImage}")`);
-    } else {
-      log('clip fallback image also failed to load:', CONFIG.heroFallbackImage, '— scene will show background only, no raven');
-    }
-    sceneEl.style.setProperty('--raven-clip', `polygon(${CONFIG.ravenClipPath.join(', ')})`);
+    sceneEl.style.setProperty('--raven-image', `url("${CONFIG.ravenImage}")`);
+    sceneEl.style.setProperty('--ruffle-clip', `polygon(${CONFIG.ruffleClipPath.join(', ')})`);
     sceneEl.style.setProperty('--head-anchor-x', `${CONFIG.headAnchor.x * 100}%`);
     sceneEl.style.setProperty('--head-anchor-y', `${CONFIG.headAnchor.y * 100}%`);
     sceneEl.style.setProperty('--eye-x', `${CONFIG.eyePosition.x * 100}%`);
     sceneEl.style.setProperty('--eye-y', `${CONFIG.eyePosition.y * 100}%`);
     sceneEl.style.setProperty('--eye-w', `${CONFIG.eyeSize.width * 100}%`);
     sceneEl.style.setProperty('--eye-h', `${CONFIG.eyeSize.height * 100}%`);
-    ravenOverlayEl.hidden = false;
-    blinkEl.hidden = false;
-    layerRavenEl.hidden = true;
+    ruffleTurbulenceEl.setAttribute('baseFrequency', CONFIG.ruffleTurbulenceFrequency);
+    ravenLoaded = true;
+    log('raven image loaded — animating procedurally (no pose-swap assets)');
+    log('renderer: PROCEDURAL');
   }
 
   // ----------------------------------------------------------------
-  // Background (production: raven-free cemetery scene)
+  // Background (raven-free cemetery scene)
   // ----------------------------------------------------------------
   async function initBackground() {
     const loaded = await preloadImage(CONFIG.heroImage);
@@ -254,12 +195,13 @@
 
   function withBusyGuard(fn) {
     return async (...args) => {
-      if (busy || Portrait.state === 'SLEEP') return;
+      if (busy || Portrait.state === 'SLEEP' || !ravenLoaded) return;
       busy = true;
       try { await fn(...args); } finally { busy = false; }
     };
   }
 
+  // --- Blink: eyelid overlay, not an image swap ---
   const doBlink = withBusyGuard(async function doBlinkInner() {
     await blinkOnce();
     if (Math.random() < CONFIG.doubleBlinkChance) {
@@ -269,47 +211,73 @@
     log('blink');
   });
 
-  async function blinkOnce() {
-    const holdMs = randInt(CONFIG.blinkDurationMinMs, CONFIG.blinkDurationMaxMs);
-    const fadeIn = randInt(CONFIG.blinkFadeInMinMs, CONFIG.blinkFadeInMaxMs);
-    const fadeOut = randInt(CONFIG.blinkFadeOutMinMs, CONFIG.blinkFadeOutMaxMs);
-    if (ravenMode === 'sprite') {
-      await setRavenState('blink', fadeIn);
-      await wait(holdMs);
-      await setRavenState('normal', fadeOut);
-      return;
-    }
-    // Clip-mode fallback: quick CSS-opacity eye patch, unrelated to sprite crossfade.
+  function blinkOnce() {
     return new Promise((resolve) => {
-      blinkEl.classList.remove('blink-closing');
-      blinkEl.classList.add('blink-active');
+      const holdMs = randInt(CONFIG.blinkDurationMinMs, CONFIG.blinkDurationMaxMs);
+      const fadeIn = randInt(CONFIG.blinkFadeInMinMs, CONFIG.blinkFadeInMaxMs);
+      const fadeOut = randInt(CONFIG.blinkFadeOutMinMs, CONFIG.blinkFadeOutMaxMs);
+      currentGesture = 'blink';
+      ravenBlinkEl.style.setProperty('--blink-in-ms', fadeIn + 'ms');
+      ravenBlinkEl.classList.remove('blink-closing');
+      ravenBlinkEl.classList.add('blink-active');
       setTimeout(() => {
-        blinkEl.classList.remove('blink-active');
-        blinkEl.classList.add('blink-closing');
-        setTimeout(resolve, 100);
+        ravenBlinkEl.style.setProperty('--blink-out-ms', fadeOut + 'ms');
+        ravenBlinkEl.classList.remove('blink-active');
+        ravenBlinkEl.classList.add('blink-closing');
+        setTimeout(() => { currentGesture = 'normal'; resolve(); }, fadeOut);
       }, holdMs);
     });
   }
 
+  // --- Ruffle: SVG turbulence filter, tweened up then back down as one
+  // continuous gesture (not discrete frames), masked to body/wing/tail. ---
   const doRuffle = withBusyGuard(async function doRuffleInner() {
-    log('ruffle');
-    if (ravenMode === 'sprite') {
-      await setRavenState('ruffle1', randInt(CONFIG.ruffleFrameFadeMinMs, CONFIG.ruffleFrameFadeMaxMs));
-      await setRavenState('ruffle2', randInt(CONFIG.ruffleFrameFadeMinMs, CONFIG.ruffleFrameFadeMaxMs));
-      await setRavenState('ruffle1', randInt(CONFIG.ruffleFrameFadeMinMs, CONFIG.ruffleFrameFadeMaxMs));
-      await setRavenState('normal', randInt(CONFIG.ruffleFrameFadeMinMs, CONFIG.ruffleFrameFadeMaxMs));
-      return;
-    }
-    ravenOverlayEl.classList.add('raven-fast-transition');
-    ravenOverlayEl.classList.add('raven-ruffle1'); await wait(260);
-    ravenOverlayEl.classList.remove('raven-ruffle1');
-    ravenOverlayEl.classList.add('raven-ruffle2'); await wait(260);
-    ravenOverlayEl.classList.remove('raven-ruffle2');
-    ravenOverlayEl.classList.add('raven-ruffle1'); await wait(220);
-    ravenOverlayEl.classList.remove('raven-ruffle1');
-    await wait(300);
-    ravenOverlayEl.classList.remove('raven-fast-transition');
+    const durationMs = randInt(CONFIG.ruffleDurationMinMs, CONFIG.ruffleDurationMaxMs);
+    log('ruffle', `(${durationMs}ms)`);
+    currentGesture = 'ruffle';
+    await animateRuffle(durationMs);
+    currentGesture = 'normal';
   });
+
+  function animateRuffle(durationMs) {
+    return new Promise((resolve) => {
+      // Fresh turbulence pattern each time so no two ruffles look identical.
+      ruffleTurbulenceEl.setAttribute('seed', String(randInt(1, 999)));
+      ravenRuffleLayerEl.classList.add('ruffle-active');
+      const start = performance.now();
+      const peakAt = durationMs * 0.35;
+      function tick(now) {
+        const t = now - start;
+        let scale;
+        if (t < peakAt) {
+          scale = (t / peakAt) * CONFIG.ruffleDisplacementScale;
+        } else if (t < durationMs) {
+          scale = CONFIG.ruffleDisplacementScale * (1 - (t - peakAt) / (durationMs - peakAt));
+        } else {
+          scale = 0;
+        }
+        ruffleDisplacementEl.setAttribute('scale', Math.max(0, scale).toFixed(2));
+        if (t < durationMs) {
+          requestAnimationFrame(tick);
+        } else {
+          ruffleDisplacementEl.setAttribute('scale', '0');
+          ravenRuffleLayerEl.classList.remove('ruffle-active');
+          resolve();
+        }
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  // --- Head move / look-viewer: subtle transform on the whole rig ---
+  async function moveRig(className, holdMs, fadeInMs, fadeOutMs) {
+    layerRavenEl.style.transitionDuration = fadeInMs + 'ms';
+    layerRavenEl.classList.add(className);
+    await wait(holdMs);
+    layerRavenEl.style.transitionDuration = fadeOutMs + 'ms';
+    layerRavenEl.classList.remove(className);
+    await wait(fadeOutMs);
+  }
 
   const doHeadMove = withBusyGuard(async function doHeadMoveInner() {
     // Deliberately only left/right here — "look at viewer" has its own
@@ -320,21 +288,13 @@
       { value: 'right', weight: 1 }
     ]);
     log('head move:', direction);
+    currentGesture = 'head-' + direction;
     const holdMs = randInt(CONFIG.headMoveHoldMinMs, CONFIG.headMoveHoldMaxMs);
     const fadeIn = randInt(CONFIG.headMoveFadeInMinMs, CONFIG.headMoveFadeInMaxMs);
     const fadeOut = randInt(CONFIG.headMoveFadeOutMinMs, CONFIG.headMoveFadeOutMaxMs);
-    if (ravenMode === 'sprite') {
-      const key = direction === 'left' ? 'headLeft' : 'headRight';
-      await setRavenState(key, fadeIn);
-      await wait(holdMs);
-      await setRavenState('normal', fadeOut);
-      return;
-    }
-    const cls = direction === 'left' ? 'raven-headL' : 'raven-headR';
-    ravenOverlayEl.classList.add(cls);
-    await wait(holdMs);
-    ravenOverlayEl.classList.remove(cls);
-    await wait(900); // let the CSS transition settle before allowing another event
+    const cls = direction === 'left' ? 'raven-move-left' : 'raven-move-right';
+    await moveRig(cls, holdMs, fadeIn, fadeOut);
+    currentGesture = 'normal';
   });
 
   // "Look at viewer" — psychological-ambiguity event. Extremely rare by
@@ -344,19 +304,12 @@
   // testing without affecting production rarity.
   const doLookViewer = withBusyGuard(async function doLookViewerInner() {
     log('look viewer (rare event)');
+    currentGesture = 'look-viewer';
     const holdMs = randInt(CONFIG.lookViewerHoldMinMs, CONFIG.lookViewerHoldMaxMs);
     const fadeIn = randInt(CONFIG.lookViewerFadeInMinMs, CONFIG.lookViewerFadeInMaxMs);
     const fadeOut = randInt(CONFIG.lookViewerFadeOutMinMs, CONFIG.lookViewerFadeOutMaxMs);
-    if (ravenMode === 'sprite') {
-      await setRavenState('lookViewer', fadeIn);
-      await wait(holdMs);
-      await setRavenState('normal', fadeOut);
-      return;
-    }
-    ravenOverlayEl.classList.add('raven-headF');
-    await wait(holdMs);
-    ravenOverlayEl.classList.remove('raven-headF');
-    await wait(900);
+    await moveRig('raven-move-viewer', holdMs, fadeIn, fadeOut);
+    currentGesture = 'normal';
   });
 
   // ----------------------------------------------------------------
@@ -553,8 +506,8 @@
     setRain, setFog, setNight, setOvercast, triggerLightning,
     setPortraitState: (s) => Portrait.setState(s),
     getPortraitState: () => Portrait.state,
-    getRavenMode: () => ravenMode,
-    getRavenState: () => currentRavenKey,
+    isRavenLoaded: () => ravenLoaded,
+    getRavenGesture: () => currentGesture,
     log
   };
 
@@ -611,13 +564,13 @@
   async function boot() {
     await initBackground();
     await initFog();
-    await detectRavenMode();
+    await initRaven();
     initBurnInProtection();
     initDebug();
     startSchedulers();
     if (window.Weather && typeof window.Weather.init === 'function') window.Weather.init();
     if (window.RavenAudio && typeof window.RavenAudio.init === 'function') window.RavenAudio.init();
-    log('boot complete — renderer:', ravenMode.toUpperCase(), '| raven state:', currentRavenKey,
+    log('boot complete — raven loaded:', ravenLoaded,
       '| fog far:', fogFarAvailable, '| fog near:', fogNearAvailable);
   }
 
