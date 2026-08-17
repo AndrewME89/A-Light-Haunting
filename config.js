@@ -8,8 +8,8 @@ const CONFIG = {
   // Location & weather — safe to leave null, the app simply never calls
   // the weather API until these are set.
   // ---------------------------------------------------------------------
-  latitude: null,
-  longitude: null,
+latitude: -37.70001,
+longitude: 145.00238,
   weatherUpdateMinutes: 5,
 
   // ---------------------------------------------------------------------
