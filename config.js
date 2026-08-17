@@ -125,11 +125,11 @@ longitude: 145.00238,
   // different for each:
   //  - black: the background measures as literal (0,0,0) with no
   //    compression noise, so `low` can sit right near zero — this
+  //    protects as much of the raven's dark shadow detail as possible
   //    while still fully clearing the flat background. Max-channel
   //    distance also keeps blue-black feather pixels such as
   //    RGB(0,1,3) opaque instead of turning them semi-transparent and
   //    washing them out against the brighter cemetery.
-  //    footage against a higher-contrast background can.
   //  - white: a dark bird against a white background has huge natural
   //    contrast, so this can be much more generous — wide enough to
   //    reliably clear near-white (not just pure-white) background pixels

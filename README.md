@@ -23,7 +23,6 @@ The clips are plain MP4s — no alpha channel — shot against a flat black or
 white background (`key: 'black' | 'white'` per clip in
 `CONFIG.ravenVideos`). A WebGL fragment shader (`initRavenVideoGL()` in
 `app.js`) samples each video frame, measures how close each pixel is to the
-key colour, and fades it to transparent within a band
 key colour, and fades it to transparent within a band. Black-backed clips
 use max-channel RGB distance rather than luminance so their blue-black
 feathers remain opaque; white-backed clips use inverse luminance
@@ -39,19 +38,6 @@ the threshold *and* the erosion are tuned separately per colour rather than
 shared:
 
 **Known limitation 1 — dark shadow feathers (`blink`, `ruffle`,
-`look-viewer`):** the raven's own darkest shadow feathers are very close to
-literal black (`RGB(0,1,3)` measured directly from footage) — essentially
-the same colour as the black background being keyed out on those three
-clips. This shows as small transparent gaps *inside* the raven's silhouette
-(not at the edge), since a shadow pixel and a background pixel can be
-colour-identical at 8-bit precision — no threshold can fully separate two
-pixels with the same value. `ravenVideoKeyThreshold.black` is tuned as
-tight as the measured data allows (background here is a clean, noise-free
-literal `0,0,0`, so `low` sits right near zero) to protect as much shadow
-detail as possible, and `ravenVideoErodeRadius.black` is **0, deliberately
-— erosion would make this specific problem worse**, not better: it spreads
-any already-transparent shadow pixel's low alpha into its opaque neighbours
-too, growing the gaps instead of shrinking them. The white-keyed clips
 `look-viewer`):** pixels that are exactly black remain indistinguishable
 from the keyed background. The compositor deliberately uses the brightest
 RGB channel rather than luminance for these clips, however, so tinted
