@@ -246,6 +246,7 @@
     uniform float uKeyLow;
     uniform float uKeyHigh;
     uniform vec2 uWatermarkCrop;
+    uniform vec2 uWatermarkCropTL;
     uniform vec2 uTexelSize;
     uniform float uErodeRadius;
 
@@ -280,8 +281,13 @@
 
       // uWatermarkCrop.y is authored as "fraction down from the top" (the
       // usual image convention), but uv.y here runs bottom-up (GL
-      // convention), so the bottom-right corner is uv.x high / uv.y LOW.
+      // convention), so the bottom-right corner is uv.x high / uv.y LOW,
+      // and the top-left corner is uv.x low / uv.y HIGH.
       if (uv.x > uWatermarkCrop.x && uv.y < (1.0 - uWatermarkCrop.y)) {
+        alpha = 0.0;
+      }
+      // Top-left "AI" watermark present on all current clips.
+      if (uv.x < uWatermarkCropTL.x && uv.y > (1.0 - uWatermarkCropTL.y)) {
         alpha = 0.0;
       }
       gl_FragColor = vec4(color.rgb, alpha);
@@ -343,11 +349,13 @@
     glUniforms.uKeyMode = gl.getUniformLocation(glProgram, 'uKeyMode');
     glUniforms.uKeyLow = gl.getUniformLocation(glProgram, 'uKeyLow');
     glUniforms.uKeyHigh = gl.getUniformLocation(glProgram, 'uKeyHigh');
-    glUniforms.uWatermarkCrop = gl.getUniformLocation(glProgram, 'uWatermarkCrop');
+    glUniforms.uWatermarkCrop   = gl.getUniformLocation(glProgram, 'uWatermarkCrop');
+    glUniforms.uWatermarkCropTL = gl.getUniformLocation(glProgram, 'uWatermarkCropTL');
     glUniforms.uTexelSize = gl.getUniformLocation(glProgram, 'uTexelSize');
     glUniforms.uErodeRadius = gl.getUniformLocation(glProgram, 'uErodeRadius');
 
-    gl.uniform2f(glUniforms.uWatermarkCrop, CONFIG.ravenVideoWatermarkCrop.x, CONFIG.ravenVideoWatermarkCrop.y);
+    gl.uniform2f(glUniforms.uWatermarkCrop,   CONFIG.ravenVideoWatermarkCrop.x,   CONFIG.ravenVideoWatermarkCrop.y);
+    gl.uniform2f(glUniforms.uWatermarkCropTL, CONFIG.ravenVideoWatermarkCropTL.w, CONFIG.ravenVideoWatermarkCropTL.h);
 
     return true;
   }

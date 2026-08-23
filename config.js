@@ -144,11 +144,14 @@ const CONFIG = {
     flightReturn:  { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Flight%20Return.mp4',    key: 'black' },
   },
 
-  // Any clips with a burned-in watermark in the bottom-right corner
-  // (an area the raven never occupies): this normalized (0–1) rectangle
-  // is forced fully transparent regardless of colour. Check each new
-  // clip and adjust if a watermark appears outside this area.
-  ravenVideoWatermarkCrop: { x: 0.83, y: 0.80 },
+  // Watermark crop regions — forced fully transparent regardless of colour.
+  // Bottom-right: AI-tool logo (e.g. KlingAI) burned into some clips.
+  //   x/y are the normalized start of the cropped corner (0–1).
+  // Top-left: "AI" text watermark present on all current clips.
+  //   w/h are the normalized width/height of the cropped corner (0–1).
+  // Check each new clip and adjust if a watermark appears outside these areas.
+  ravenVideoWatermarkCrop:    { x: 0.83, y: 0.80 },      // bottom-right corner
+  ravenVideoWatermarkCropTL:  { w: 0.07, h: 0.07 },      // top-left corner
 
   // Key softness: pixels within this normalized distance of the key colour
   // fade to transparent (smoothstep). All current clips are black-keyed.
