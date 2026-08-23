@@ -5,16 +5,24 @@
  *  - Everything timing-related uses recursive setTimeout with fresh random
  *    delays each time (never setInterval), so no two events share a phase
  *    and the viewer can't learn a rhythm.
- *  - The raven rests as ONE static image (assets/raven/raven-normal.png).
- *    Gestures (blink, ruffle, head-move, subtle, look-viewer) are short
- *    pre-rendered video clips (assets/raven/video/*.mp4). Each clip sits
- *    on a flat black or white background with no alpha channel, so at
- *    playback a small WebGL shader keys that flat colour out in real
- *    time and composites just the raven over the cemetery background —
- *    see initRavenVideoGL()/playGestureVideo() below, and README "How the
- *    raven animates" for the one known limitation (very dark shadow
- *    feathers on the black-keyed clips are close to the same colour as
- *    the background in that footage).
+ *  - The raven is baked into the hero image (assets/backgrounds/hero.png)
+ *    and is visible at rest without any separate raven PNG.
+ *    CONFIG.ravenImage is null — initRaven() detects this and sets
+ *    ravenLoaded = true immediately so all gesture schedulers start normally.
+ *  - Gestures (blink, doubleBlink, ruffle, headLeft, featherSettle, preen,
+ *    wingStretch, lookViewer, flightAway, flightReturn) are short pre-rendered
+ *    video clips (assets/raven/video/*.mp4). Each clip sits on a flat black
+ *    background with no alpha channel, so at playback a small WebGL shader
+ *    keys that flat colour out in real time and composites just the animated
+ *    raven over the hero background — see initRavenVideoGL()/playGestureVideo()
+ *    below, and README "How the raven animates" for the one known limitation
+ *    (very dark shadow feathers on the black-keyed clips are close to the same
+ *    colour as the background in that footage).
+ *  - FLIGHT BEHAVIOUR: flightAway and flightReturn are ALWAYS paired.
+ *    doFlightAway is the ONLY entry point — it plays the Away clip, swaps the
+ *    background to the empty cemetery (CONFIG.heroImageEmpty), waits a random
+ *    interval, then plays flightReturn and restores hero.png. flightReturn has
+ *    NO independent scheduler and is NEVER triggered standalone.
  *  - window.RavenPortrait is the public surface future modules (weather,
  *    audio, house integration) call into.
  */
@@ -102,7 +110,7 @@
   });
 
   // ----------------------------------------------------------------
-  // Raven — static resting image
+  // Raven — static resting image (or baked into hero)
   // ----------------------------------------------------------------
   let ravenLoaded = false;
   let currentGesture = 'normal'; // debug-only label
@@ -117,27 +125,41 @@
   }
 
   async function initRaven() {
+    sceneEl.style.setProperty('--raven-crossfade-ms', CONFIG.ravenVideoCrossfadeMs + 'ms');
+    // When the raven is baked into the hero image, no separate raven PNG is
+    // needed. Set ravenLoaded immediately so gesture schedulers start normally.
+    if (!CONFIG.ravenImage) {
+      ravenLoaded = true;
+      log('raven baked into hero image — static overlay disabled');
+      return;
+    }
     const loaded = await preloadImage(CONFIG.ravenImage);
     if (!loaded) {
-      log('WARNING: raven image failed to load at', CONFIG.ravenImage, '— scene will show the cemetery with no raven');
+      log('WARNING: raven image failed to load at', CONFIG.ravenImage,
+        '— set CONFIG.ravenImage = null if no separate raven cutout is used');
       return;
     }
     sceneEl.style.setProperty('--raven-image', `url("${CONFIG.ravenImage}")`);
-    sceneEl.style.setProperty('--raven-crossfade-ms', CONFIG.ravenVideoCrossfadeMs + 'ms');
     ravenLoaded = true;
     log('raven image loaded');
   }
 
   // ----------------------------------------------------------------
-  // Background (raven-free cemetery scene)
+  // Background — swappable between hero (with raven) and empty cemetery
   // ----------------------------------------------------------------
+  function setBackground(src) {
+    sceneEl.style.setProperty('--bg-image', `url("${src}")`);
+  }
+
   async function initBackground() {
     const loaded = await preloadImage(CONFIG.heroImage);
     if (loaded) {
-      sceneEl.style.setProperty('--bg-image', `url("${CONFIG.heroImage}")`);
+      setBackground(CONFIG.heroImage);
     } else {
       log('background image failed to load:', CONFIG.heroImage, '— running with blank scene');
     }
+    // Pre-warm the empty cemetery so the swap is instant when flight fires.
+    if (CONFIG.heroImageEmpty) preloadImage(CONFIG.heroImageEmpty);
   }
 
   // ----------------------------------------------------------------
@@ -167,11 +189,16 @@
   // Raven gesture videos — WebGL real-time luma-key compositor
   // ----------------------------------------------------------------
   const videoEls = {
-    blink: document.getElementById('video-blink'),
-    ruffle: document.getElementById('video-ruffle'),
-    headLeft: document.getElementById('video-headLeft'),
-    lookViewer: document.getElementById('video-lookViewer'),
-    subtle: document.getElementById('video-subtle')
+    blink:         document.getElementById('video-blink'),
+    doubleBlink:   document.getElementById('video-doubleBlink'),
+    ruffle:        document.getElementById('video-ruffle'),
+    headLeft:      document.getElementById('video-headLeft'),
+    lookViewer:    document.getElementById('video-lookViewer'),
+    featherSettle: document.getElementById('video-featherSettle'),
+    preen:         document.getElementById('video-preen'),
+    wingStretch:   document.getElementById('video-wingStretch'),
+    flightAway:    document.getElementById('video-flightAway'),
+    flightReturn:  document.getElementById('video-flightReturn')
   };
   const videoAvailable = {};
 
@@ -196,21 +223,19 @@
   // is then smoothstep'd between uKeyLow/uKeyHigh into an alpha value — a
   // tight band so it only clears genuinely flat background, not merely
   // dark/light raven pixels. uWatermarkCrop forces the bottom-right corner
-  // (where two of the source clips have a burned-in tool watermark)
-  // fully transparent regardless of colour.
+  // (where source clips may have a burned-in tool watermark) fully
+  // transparent regardless of colour.
   //
   // alphaAt() is sampled at the pixel plus eight small neighbour offsets
   // (4 cardinal + 4 diagonal), taking the minimum — an "erode" pass that
   // shrinks the opaque raven silhouette inward by uErodeRadius texels.
   // Video compression blends a few pixels of background into the raven's
   // edge, which a single-sample key leaves as a faint, semi-transparent
-  // fringe around the whole silhouette — visible as a light "outline"
-  // against the cemetery. Eroding treats any pixel near a background
-  // pixel as background too, trading a thinner raven edge for removing
-  // that halo. uErodeRadius is 0 for the black-keyed clips (see
+  // fringe around the whole silhouette. Eroding treats any pixel near a
+  // background pixel as background too, trading a thinner raven edge for
+  // removing that halo. uErodeRadius is 0 for the black-keyed clips (see
   // CONFIG.ravenVideoErodeRadius for why) — at 0 every extra tap samples
-  // the same texel as the centre, so this is a correct no-op, not just an
-  // approximation.
+  // the same texel as the centre, so this is a correct no-op.
   const FRAGMENT_SRC = `
     precision mediump float;
     varying vec2 vBaseUV;
@@ -426,7 +451,7 @@
   }
 
   // ----------------------------------------------------------------
-  // Raven behaviour: blink / ruffle / head move / subtle / look-at-viewer
+  // Raven behaviour — gestures and schedulers
   // ----------------------------------------------------------------
   let busy = false;
 
@@ -447,17 +472,70 @@
     });
   }
 
-  const doBlink = makeGesture('blink', 'blink', 'blink');
-  const doRuffle = makeGesture('ruffle', 'ruffle', 'ruffle');
+  const doBlink         = makeGesture('blink',         'blink',                    'blink');
+  const doDoubleBlink   = makeGesture('doubleBlink',   'double blink',             'double-blink');
+  const doRuffle        = makeGesture('ruffle',         'ruffle',                   'ruffle');
   // Only ever turns left — there is no head-right clip.
-  const doHeadMove = makeGesture('headLeft', 'head move: left', 'head-left');
-  const doSubtle = makeGesture('subtle', 'subtle shift', 'subtle');
+  const doHeadMove      = makeGesture('headLeft',       'head move: left',          'head-left');
+  const doFeatherSettle = makeGesture('featherSettle',  'feather settle',           'feather-settle');
+  const doPreen         = makeGesture('preen',          'preen',                    'preen');
+  const doWingStretch   = makeGesture('wingStretch',    'wing stretch',             'wing-stretch');
   // "Look at viewer" — psychological-ambiguity event. Extremely rare by
   // design: independent scheduler (see startSchedulers), long interval,
   // and a chance to skip a scheduled attempt outright so real gaps of
   // several hours are common. Debug key 'v' can trigger it on demand for
   // testing without affecting production rarity.
-  const doLookViewer = makeGesture('lookViewer', 'look viewer (rare event)', 'look-viewer');
+  const doLookViewer    = makeGesture('lookViewer',     'look viewer (rare event)', 'look-viewer');
+
+  // FLIGHT — always paired. doFlightAway is the ONLY public entry point.
+  // It plays flightAway, swaps the background to the empty cemetery, waits
+  // a random absence, then plays flightReturn and restores hero.png.
+  // flightReturn has no scheduler of its own and must never fire standalone.
+  async function _doFlightAway() {
+    log('flight away (rare event)');
+    currentGesture = 'flight-away';
+    await playGestureVideo('flightAway');
+    currentGesture = 'normal';
+
+    // Swap to empty cemetery while the raven is absent.
+    if (CONFIG.heroImageEmpty) setBackground(CONFIG.heroImageEmpty);
+
+    const returnDelay = rand(
+      minutesToMs(CONFIG.flightReturnMinMinutes),
+      minutesToMs(CONFIG.flightReturnMaxMinutes)
+    );
+    log('flight return in', (returnDelay / 60000).toFixed(1), 'min');
+
+    setTimeout(async () => {
+      // If something else grabbed the busy lock in the meantime, wait a bit
+      // more — we must return regardless, so retry once after a short pause.
+      if (busy || Portrait.state === 'SLEEP') {
+        setTimeout(async () => {
+          busy = true;
+          try {
+            log('flight return (delayed retry)');
+            currentGesture = 'flight-return';
+            await playGestureVideo('flightReturn');
+            currentGesture = 'normal';
+          } finally { busy = false; }
+          if (CONFIG.heroImage) setBackground(CONFIG.heroImage);
+        }, 15000);
+        return;
+      }
+      busy = true;
+      try {
+        log('flight return');
+        currentGesture = 'flight-return';
+        await playGestureVideo('flightReturn');
+        currentGesture = 'normal';
+      } finally { busy = false; }
+      if (CONFIG.heroImage) setBackground(CONFIG.heroImage);
+    }, returnDelay);
+  }
+  // Wrap in the busy guard so a concurrent gesture won't interrupt the
+  // flight-away clip itself. The return is handled internally, outside the
+  // guard — see _doFlightAway above.
+  const doFlightAway = withBusyGuard(_doFlightAway);
 
   // ----------------------------------------------------------------
   // Independent random schedulers
@@ -485,11 +563,17 @@
   }
 
   function startSchedulers() {
-    scheduleLoop(secondsToMs(CONFIG.blinkMinSeconds), secondsToMs(CONFIG.blinkMaxSeconds), doBlink, 'blink');
-    scheduleLoop(minutesToMs(CONFIG.ruffleMinMinutes), minutesToMs(CONFIG.ruffleMaxMinutes), doRuffle, 'ruffle');
-    scheduleLoop(minutesToMs(CONFIG.headMoveMinMinutes), minutesToMs(CONFIG.headMoveMaxMinutes), doHeadMove, 'headMove');
-    scheduleLoop(minutesToMs(CONFIG.subtleMinMinutes), minutesToMs(CONFIG.subtleMaxMinutes), doSubtle, 'subtle');
-    scheduleLoop(minutesToMs(CONFIG.lookViewerMinMinutes), minutesToMs(CONFIG.lookViewerMaxMinutes), doLookViewer, 'lookViewer', { skipChance: CONFIG.lookViewerSkipChance });
+    scheduleLoop(secondsToMs(CONFIG.blinkMinSeconds),         secondsToMs(CONFIG.blinkMaxSeconds),         doBlink,         'blink');
+    scheduleLoop(secondsToMs(CONFIG.doubleBlinkMinSeconds),   secondsToMs(CONFIG.doubleBlinkMaxSeconds),   doDoubleBlink,   'doubleBlink');
+    scheduleLoop(minutesToMs(CONFIG.ruffleMinMinutes),        minutesToMs(CONFIG.ruffleMaxMinutes),        doRuffle,        'ruffle');
+    scheduleLoop(minutesToMs(CONFIG.headMoveMinMinutes),      minutesToMs(CONFIG.headMoveMaxMinutes),      doHeadMove,      'headMove');
+    scheduleLoop(minutesToMs(CONFIG.featherSettleMinMinutes), minutesToMs(CONFIG.featherSettleMaxMinutes), doFeatherSettle, 'featherSettle');
+    scheduleLoop(minutesToMs(CONFIG.wingStretchMinMinutes),   minutesToMs(CONFIG.wingStretchMaxMinutes),   doWingStretch,   'wingStretch');
+    scheduleLoop(minutesToMs(CONFIG.preenMinMinutes),         minutesToMs(CONFIG.preenMaxMinutes),         doPreen,         'preen');
+    scheduleLoop(minutesToMs(CONFIG.lookViewerMinMinutes),    minutesToMs(CONFIG.lookViewerMaxMinutes),    doLookViewer,    'lookViewer', { skipChance: CONFIG.lookViewerSkipChance });
+    scheduleLoop(minutesToMs(CONFIG.flightAwayMinMinutes),    minutesToMs(CONFIG.flightAwayMaxMinutes),    doFlightAway,    'flightAway', { skipChance: CONFIG.flightAwaySkipChance });
+    // NOTE: there is intentionally NO scheduler for flightReturn — it is
+    // triggered automatically inside _doFlightAway and never fires standalone.
   }
 
   // ----------------------------------------------------------------
@@ -671,10 +755,16 @@
     window.addEventListener('keydown', (e) => {
       switch (e.key) {
         case 'b': doBlink(); break;
+        case 'e': doDoubleBlink(); break;
         case 'r': doRuffle(); break;
         case 'h': doHeadMove(); break;
-        case 'u': doSubtle(); break;
+        case 'u': doFeatherSettle(); break;
         case 'v': doLookViewer(); break;
+        case 'p': doPreen(); break;
+        case 'g': doWingStretch(); break;
+        case 'f': doFlightAway(); break;
+        // 'n' is a reminder — flightReturn is always automatic
+        case 'n': log('flight-return fires automatically after flight-away; never triggered standalone'); break;
         case 'l': triggerLightning(Math.random() < 0.5 ? 'weak' : 'strong'); break;
         case '1': setRain(rainIntensity > 0 ? 0 : 0.6); break;
         case '2': setFog(0.7); break;

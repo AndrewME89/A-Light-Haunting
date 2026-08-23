@@ -8,18 +8,22 @@ const CONFIG = {
   // Location & weather — safe to leave null, the app simply never calls
   // the weather API until these are set.
   // ---------------------------------------------------------------------
-latitude: -37.70001,
-longitude: 145.00238,
+  latitude: -37.70001,
+  longitude: 145.00238,
   weatherUpdateMinutes: 5,
 
   // ---------------------------------------------------------------------
   // Raven behaviour scheduling — how OFTEN each gesture fires. The
-  // gesture itself (what it looks like, how long it takes) now comes from
-  // a pre-rendered video clip, not procedural timing — see "How the raven
-  // animates" in README. Durations below are for scheduling only.
+  // gesture itself (what it looks like, how long it takes) comes from a
+  // pre-rendered video clip. Durations below are for scheduling only.
   // ---------------------------------------------------------------------
   blinkMinSeconds: 20,
   blinkMaxSeconds: 120,
+
+  // Double-blink — on its own independent scheduler; slightly rarer than
+  // a single blink so the two don't overlap in feel.
+  doubleBlinkMinSeconds: 45,
+  doubleBlinkMaxSeconds: 180,
 
   ruffleMinMinutes: 4,
   ruffleMaxMinutes: 20,
@@ -27,27 +31,42 @@ longitude: 145.00238,
   headMoveMinMinutes: 10,
   headMoveMaxMinutes: 40,
 
-  // A small independent "settle/shift" gesture (assets/raven/video/subtle.mp4)
-  // — its own rare scheduler, same philosophy as the others.
-  subtleMinMinutes: 6,
-  subtleMaxMinutes: 25,
+  // Tiny feather settle — the subtlest, most frequent gesture.
+  featherSettleMinMinutes: 3,
+  featherSettleMaxMinutes: 12,
 
-  // "Look at viewer" — deliberately the rarest, on its own independent
-  // scheduler so it never gets mixed in with ordinary head-turn odds.
+  // Wing stretch — extends a wing briefly, then resets.
+  wingStretchMinMinutes: 5,
+  wingStretchMaxMinutes: 18,
+
+  // Preening — beak to feathers. Slightly rarer than feather settle.
+  preenMinMinutes: 8,
+  preenMaxMinutes: 25,
+
+  // "Look at viewer" — psychological-ambiguity event. Deliberately the
+  // rarest routine gesture, on its own scheduler with an extra skip chance.
   lookViewerMinMinutes: 60,
   lookViewerMaxMinutes: 180,
-  // Chance a scheduled attempt is skipped outright (just reschedules),
-  // so real-world gaps of many hours are common.
   lookViewerSkipChance: 0.3,
 
-  // Occasionally skip a scheduled event entirely and roll a much longer
-  // wait instead, so the viewer can never learn the rhythm.
+  // Flight away / return — the raven leaves the scene entirely and is
+  // gone for several minutes. After flightAway plays, the screen shows
+  // the empty cemetery. flightReturn is then scheduled automatically;
+  // it is NEVER triggered independently — the two clips are always paired.
+  flightAwayMinMinutes: 180,
+  flightAwayMaxMinutes: 480,
+  flightAwaySkipChance: 0.4,
+  // How long the raven is absent between the two clips:
+  flightReturnMinMinutes: 1,
+  flightReturnMaxMinutes: 5,
+
+  // Occasionally skip a scheduled event and roll a much longer wait,
+  // so the viewer can never learn the rhythm.
   longQuietPeriodChance: 0.12,
   longQuietPeriodMultiplier: 3,
 
-  // Crossfade between the static resting image and the video overlay
-  // when a gesture starts/ends (and vice versa). Kept short — this just
-  // smooths the seam, it's not meant to be noticeable itself.
+  // Crossfade between the resting image and the video overlay when a
+  // gesture starts/ends. Kept short — just smooths the seam.
   ravenVideoCrossfadeMs: 120,
 
   // ---------------------------------------------------------------------
@@ -80,12 +99,20 @@ longitude: 145.00238,
   // ---------------------------------------------------------------------
   // Assets
   // ---------------------------------------------------------------------
-  // Background-only cemetery scene (raven cleanly removed).
-  heroImage: 'assets/backgrounds/cemetery-background.png',
+  // Main scene — the cemetery WITH the raven as a painted element.
+  // Shown whenever no gesture video is playing.
+  heroImage: 'assets/backgrounds/hero.png',
 
-  // The raven at rest: a single isolated cutout, pixel-aligned to the
-  // same canvas as heroImage. Shown whenever no gesture video is playing.
-  ravenImage: 'assets/raven/raven-normal.png',
+  // The empty cemetery — raven absent. Shown automatically while the
+  // raven is between a Flight Away and Flight Return clip. Never shown
+  // at any other time.
+  heroImageEmpty: 'assets/backgrounds/cemetery-background.png',
+
+  // Static raven cutout (raven-normal.png). No longer used — the raven
+  // is now part of heroImage. Set to null so the app skips the preload
+  // step and still allows gestures to fire. If you later need a separate
+  // raven layer, set this to the PNG path.
+  ravenImage: null,
 
   // Painted fog overlays (real artwork, not CSS gradients). Missing files
   // are detected gracefully — that layer just stays inactive.
@@ -95,60 +122,50 @@ longitude: 145.00238,
   // ---------------------------------------------------------------------
   // Raven gesture videos
   // ---------------------------------------------------------------------
-  // Each is a short clip against a *flat* black or white background (no
-  // alpha channel — these are plain MP4s). At playback, a WebGL shader
-  // keys out that flat background in real time so only the raven shows,
-  // composited over heroImage exactly where raven-normal.png normally
-  // sits. `key` says which flat colour to remove. See README "How the
-  // raven animates" for the keying/watermark-crop approach and its one
-  // known limitation (very dark shadow feathers on the black-keyed clips
-  // can pick up faint transparency, since they're nearly the same colour
-  // as the background in that footage).
+  // All clips are shot against a flat black background (no alpha channel).
+  // The WebGL compositor keys that background out in real time. See
+  // README "How the raven animates" for the keying approach and its
+  // one known limitation (very dark shadow feathers can pick up faint
+  // transparency against the true-black key).
+  //
+  // flightAway and flightReturn are always paired — the app schedules
+  // flightReturn automatically after flightAway completes. Never trigger
+  // flightReturn independently.
   ravenVideos: {
-    blink:      { src: 'assets/raven/video/blink.mp4',       key: 'black' },
-    ruffle:     { src: 'assets/raven/video/ruffle.mp4',      key: 'black' },
-    headLeft:   { src: 'assets/raven/video/head-left.mp4',   key: 'white' },
-    lookViewer: { src: 'assets/raven/video/look-viewer.mp4', key: 'black' },
-    subtle:     { src: 'assets/raven/video/subtle.mp4',      key: 'white' }
+    blink:         { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Blink.mp4',               key: 'black' },
+    doubleBlink:   { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Double%20Blink.mp4',      key: 'black' },
+    ruffle:        { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Ruffle.mp4',              key: 'black' },
+    headLeft:      { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Look%20Left.mp4',         key: 'black' },
+    lookViewer:    { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Look%20Viewer.mp4',       key: 'black' },
+    featherSettle: { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Small%20Feather%20Settle.mp4', key: 'black' },
+    preen:         { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Preen.mp4',              key: 'black' },
+    wingStretch:   { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Wing%20Stretch.mp4',     key: 'black' },
+    flightAway:    { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Flight%20Away.mp4',      key: 'black' },
+    flightReturn:  { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Flight%20Return.mp4',    key: 'black' },
   },
 
-  // Two of the clips have a small AI-tool watermark burned into the
-  // bottom-right corner, outside where the raven ever sits. This
-  // normalized (0–1) rectangle is forced fully transparent regardless of
-  // colour, cropping the watermark out of the visible composite.
+  // Any clips with a burned-in watermark in the bottom-right corner
+  // (an area the raven never occupies): this normalized (0–1) rectangle
+  // is forced fully transparent regardless of colour. Check each new
+  // clip and adjust if a watermark appears outside this area.
   ravenVideoWatermarkCrop: { x: 0.83, y: 0.80 },
 
   // Key softness: pixels within this normalized distance of the key colour
-  // fade to transparent (smoothstep between the two values). Black distance
-  // uses the brightest RGB channel; white distance uses inverse luminance.
-  // Split per key colour because the safe margin is very
-  // different for each:
-  //  - black: the background measures as literal (0,0,0) with no
-  //    compression noise, so `low` can sit right near zero — this
-  //    protects as much of the raven's dark shadow detail as possible
-  //    while still fully clearing the flat background. Max-channel
-  //    distance also keeps blue-black feather pixels such as
-  //    RGB(0,1,3) opaque instead of turning them semi-transparent and
-  //    washing them out against the brighter cemetery.
-  //  - white: a dark bird against a white background has huge natural
-  //    contrast, so this can be much more generous — wide enough to
-  //    reliably clear near-white (not just pure-white) background pixels
-  //    and compression fringe, with no risk to the (dark) raven.
+  // fade to transparent (smoothstep). All current clips are black-keyed.
+  // Max-channel RGB distance (not luminance) keeps blue-black feather
+  // pixels such as RGB(0,1,3) opaque against the true-black background.
+  // The white entry is preserved for any future white-keyed clips.
   ravenVideoKeyThreshold: {
     black: { low: 0.001, high: 0.008 },
     white: { low: 0.12, high: 0.30 }
   },
 
-  // Erosion radius (in texels) for the edge-fringe cleanup pass — shrinks
-  // the opaque silhouette inward by roughly this many pixels. Also split
-  // per key colour, and for the opposite reason from the threshold split:
-  //  - white: erosion is the fix for edge fringe (compression blending a
-  //    few background pixels into the silhouette boundary), so this is
-  //    deliberately strong.
-  //  - black: erosion does NOT help the interior shadow-collision problem
-  //    above — it would actively spread those already-fragile dark spots
-  //    outward by eroding the alpha they'd otherwise inherit from
-  //    neighbouring opaque pixels. Kept at 0 (off) for that reason.
+  // Erosion radius (in texels) — shrinks the opaque silhouette inward to
+  // remove compression-fringe halo at silhouette edges.
+  //  - black: 0 (off). The raven's shadow feathers are near-black; erosion
+  //    would spread those fragile transparent spots. The flat background
+  //    has no compression noise so the threshold alone is sufficient.
+  //  - white: strong erosion for white-keyed clips (not currently used).
   ravenVideoErodeRadius: {
     black: 0,
     white: 2.5

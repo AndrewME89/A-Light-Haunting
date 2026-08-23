@@ -9,16 +9,17 @@
 <body>
   <div id="stage">
     <div id="scene">
-      <!-- 1. Cemetery background, raven removed (production base layer) -->
+      <!-- 1. Cemetery background (with raven painted in as normal state) -->
       <div class="layer layer-hero" id="layer-hero"></div>
 
       <!-- 2. Far fog — painted overlay, sits behind the raven -->
       <div class="layer layer-fog layer-fog-far" id="layer-fog-far"></div>
 
-      <!-- 3. Raven — a static resting image, replaced by a real-time
-           WebGL-composited video clip whenever a gesture is playing. The
-           canvas sits on top of (and is mutually exclusive with) the
-           static image — see README "How the raven animates". -->
+      <!-- 3. Raven — the static raven is part of the hero background image.
+           The canvas here is used only during gesture playback: a WebGL
+           shader keys out the flat black background from each video clip
+           in real time, compositing just the animated raven over the scene.
+           See README "How the raven animates". -->
       <div class="layer layer-raven" id="layer-raven">
         <div class="raven-base" id="raven-base"></div>
         <canvas class="raven-video-canvas" id="raven-video-canvas"></canvas>
@@ -46,20 +47,28 @@
 
   <!-- Hidden, preloaded gesture-video sources. Muted (autoplay-safe) and
        never inserted into the visible layout — app.js reads frames from
-       these into the WebGL canvas above. -->
+       these into the WebGL canvas above.
+       flightAway and flightReturn are always paired: flightReturn fires
+       automatically after flightAway; never trigger it independently. -->
   <div class="raven-video-sources" aria-hidden="true">
-    <video id="video-blink" muted playsinline preload="auto"></video>
-    <video id="video-ruffle" muted playsinline preload="auto"></video>
-    <video id="video-headLeft" muted playsinline preload="auto"></video>
-    <video id="video-lookViewer" muted playsinline preload="auto"></video>
-    <video id="video-subtle" muted playsinline preload="auto"></video>
+    <video id="video-blink"         muted playsinline preload="auto"></video>
+    <video id="video-doubleBlink"   muted playsinline preload="auto"></video>
+    <video id="video-ruffle"        muted playsinline preload="auto"></video>
+    <video id="video-headLeft"      muted playsinline preload="auto"></video>
+    <video id="video-lookViewer"    muted playsinline preload="auto"></video>
+    <video id="video-featherSettle" muted playsinline preload="auto"></video>
+    <video id="video-preen"         muted playsinline preload="auto"></video>
+    <video id="video-wingStretch"   muted playsinline preload="auto"></video>
+    <video id="video-flightAway"    muted playsinline preload="auto"></video>
+    <video id="video-flightReturn"  muted playsinline preload="auto"></video>
   </div>
 
   <div id="debug-panel" hidden>
     <div id="debug-title">DEBUG</div>
     <div id="debug-log"></div>
     <div class="debug-hint">
-      b=blink r=ruffle h=head-turn u=subtle v=look-at-viewer<br />
+      b=blink e=double-blink r=ruffle h=head-turn u=feather-settle v=look-viewer<br />
+      p=preen g=wing-stretch f=flight-away (auto-triggers return)<br />
       l=lightning 1=rain 2=fog 3=night 4=storm 0=reset<br />
       a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY &nbsp; d=hide panel
     </div>
