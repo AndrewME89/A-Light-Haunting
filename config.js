@@ -84,6 +84,14 @@ const CONFIG = {
   // ---------------------------------------------------------------------
   lightningEnabled: true,
 
+  // Opaque full-scene clips (not WebGL-keyed raven gestures). Mausoleum has
+  // no production scheduler until its cadence is explicitly approved.
+  environmentVideoCrossfadeMs: 180,
+  environmentVideos: {
+    lightning: { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Lightning.mp4' },
+    mausoleum: { src: 'assets/raven/video/Raven%20Animation%20%E2%80%93%20Mausoleum.mp4' }
+  },
+
   // ---------------------------------------------------------------------
   // Display safety
   // ---------------------------------------------------------------------

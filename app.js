@@ -60,7 +60,9 @@
   const layerRavenEl = document.getElementById('layer-raven');
   const ravenBaseEl = document.getElementById('raven-base');
   const ravenVideoCanvas = document.getElementById('raven-video-canvas');
+  const environmentVideoEl = document.getElementById('environment-video');
   const daynightEl = document.getElementById('layer-daynight');
+  const moonlightEl = document.getElementById('layer-moonlight');
   const cloudsEl = document.getElementById('layer-clouds');
   const fogFarEl = document.getElementById('layer-fog-far');
   const fogNearEl = document.getElementById('layer-fog-near');
@@ -113,6 +115,7 @@
   // Raven — static resting image (or baked into hero)
   // ----------------------------------------------------------------
   let ravenLoaded = false;
+  let ravenAbsent = false;
   let currentGesture = 'normal'; // debug-only label
 
   function preloadImage(src) {
@@ -465,7 +468,7 @@
 
   function withBusyGuard(fn) {
     return async (...args) => {
-      if (busy || Portrait.state === 'SLEEP' || !ravenLoaded) return;
+      if (busy || ravenAbsent || Portrait.state === 'SLEEP' || !ravenLoaded) return;
       busy = true;
       try { await fn(...args); } finally { busy = false; }
     };
@@ -501,12 +504,13 @@
   // flightReturn has no scheduler of its own and must never fire standalone.
   async function _doFlightAway() {
     log('flight away (rare event)');
+    // hero.png contains the resting raven. Swap before departure so it cannot
+    // show through after the keyed animated raven leaves the perch.
+    if (CONFIG.heroImageEmpty) setBackground(CONFIG.heroImageEmpty);
+    ravenAbsent = true;
     currentGesture = 'flight-away';
     await playGestureVideo('flightAway');
     currentGesture = 'normal';
-
-    // Swap to empty cemetery while the raven is absent.
-    if (CONFIG.heroImageEmpty) setBackground(CONFIG.heroImageEmpty);
 
     const returnDelay = rand(
       minutesToMs(CONFIG.flightReturnMinMinutes),
@@ -527,6 +531,7 @@
             currentGesture = 'normal';
           } finally { busy = false; }
           if (CONFIG.heroImage) setBackground(CONFIG.heroImage);
+          ravenAbsent = false;
         }, 15000);
         return;
       }
@@ -538,6 +543,7 @@
         currentGesture = 'normal';
       } finally { busy = false; }
       if (CONFIG.heroImage) setBackground(CONFIG.heroImage);
+      ravenAbsent = false;
     }, returnDelay);
   }
   // Wrap in the busy guard so a concurrent gesture won't interrupt the
@@ -594,9 +600,60 @@
   let stormActive = false;
   let stormTimer = null;
 
+  // Full-scene clips share the raven busy lock because they contain a raven.
+  // Playback is always muted and cleanup is common to end/error/reset.
+  const environmentVideoAvailable = {};
+  let environmentCleanup = null;
+
+  async function initEnvironmentVideos() {
+    sceneEl.style.setProperty('--environment-crossfade-ms', CONFIG.environmentVideoCrossfadeMs + 'ms');
+    await Promise.all(Object.keys(CONFIG.environmentVideos || {}).map((key) => new Promise((resolve) => {
+      const probe = document.createElement('video');
+      probe.muted = true;
+      probe.preload = 'auto';
+      probe.onloadeddata = () => { environmentVideoAvailable[key] = true; resolve(); };
+      probe.onerror = () => { environmentVideoAvailable[key] = false; log('WARNING: environment video failed:', key); resolve(); };
+      probe.src = CONFIG.environmentVideos[key].src;
+    })));
+  }
+
+  function stopEnvironmentVideo() {
+    if (environmentCleanup) environmentCleanup();
+  }
+
+  function playEnvironmentVideo(key) {
+    if (busy || ravenAbsent || Portrait.state === 'SLEEP' || !environmentVideoAvailable[key]) return false;
+    const cfg = CONFIG.environmentVideos[key];
+    busy = true;
+    environmentVideoEl.muted = true;
+    environmentVideoEl.src = cfg.src;
+    environmentVideoEl.currentTime = 0;
+    let finished = false;
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      environmentVideoEl.pause();
+      environmentVideoEl.classList.remove('environment-video-active');
+      environmentVideoEl.removeEventListener('ended', cleanup);
+      environmentVideoEl.removeEventListener('error', cleanup);
+      environmentVideoEl.removeAttribute('src');
+      environmentVideoEl.load();
+      environmentCleanup = null;
+      busy = false;
+      log('environment video ended:', key);
+    };
+    environmentCleanup = cleanup;
+    environmentVideoEl.addEventListener('ended', cleanup);
+    environmentVideoEl.addEventListener('error', cleanup);
+    environmentVideoEl.classList.add('environment-video-active');
+    environmentVideoEl.play().then(() => log('environment video:', key)).catch(cleanup);
+    return true;
+  }
+
   function setNight(on) {
     nightFlag = on;
     daynightEl.classList.toggle('is-night', on);
+    moonlightEl.classList.toggle('is-night', on);
   }
 
   function setOvercast(intensity) {
@@ -622,6 +679,12 @@
 
   function triggerLightning(strength) {
     if (!CONFIG.lightningEnabled) return;
+    // If the dedicated clip is available, a busy scene skips this strike
+    // rather than compounding the old CSS flash over another event.
+    if (environmentVideoAvailable.lightning) {
+      playEnvironmentVideo('lightning');
+      return;
+    }
     lightningEl.classList.remove('flash-weak', 'flash-strong');
     // reflow to restart animation
     void lightningEl.offsetWidth;
@@ -744,6 +807,8 @@
   // ----------------------------------------------------------------
   window.RavenPortrait = {
     setRain, setFog, setNight, setOvercast, triggerLightning,
+    triggerMausoleum: () => playEnvironmentVideo('mausoleum'),
+    stopEnvironmentVideo,
     setPortraitState: (s) => Portrait.setState(s),
     getPortraitState: () => Portrait.state,
     isRavenLoaded: () => ravenLoaded,
@@ -774,12 +839,13 @@
         // 'n' is a reminder — flightReturn is always automatic
         case 'n': log('flight-return fires automatically after flight-away; never triggered standalone'); break;
         case 'l': triggerLightning(Math.random() < 0.5 ? 'weak' : 'strong'); break;
+        case 'm': playEnvironmentVideo('mausoleum'); break;
         case '1': setRain(rainIntensity > 0 ? 0 : 0.6); break;
         case '2': setFog(0.7); break;
         case '3': setNight(!nightFlag); break;
         case '4': stormActive ? (stopStorm(), setRain(0)) : (startStorm(), setRain(0.8), setOvercast(0.8), setNight(true)); break;
         case '0':
-          setRain(0); setFog(0); setNight(false); setOvercast(0); stopStorm();
+          setRain(0); setFog(0); setNight(false); setOvercast(0); stopStorm(); stopEnvironmentVideo();
           log('reset visual state'); break;
         case 'a': Portrait.setState('ACTIVE'); break;
         case 'i': Portrait.setState('IDLE'); break;
@@ -800,6 +866,7 @@
     await initFog();
     await initRaven();
     await initRavenVideos();
+    await initEnvironmentVideos();
     initBurnInProtection();
     initDebug();
     startSchedulers();
