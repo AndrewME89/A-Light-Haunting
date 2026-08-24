@@ -75,11 +75,20 @@ The compositing stack (back to front):
 2. **Far fog** — painted overlay behind the raven
 3. **Raven layer** — canvas (WebGL) over a static div; mutually exclusive
 4. **Near fog** — painted overlay in front of the raven
-5. **Day/night** — darkens the whole scene for night mode
-6. **Overcast** — semi-transparent cloud darkness
-7. **Rain** — canvas particle simulation
-8. **Lightning** — CSS flash animation
-9. **Vignette** — foreground framing
+5. **Environment video** — temporary opaque Lightning/Mausoleum scene
+6. **Day/night + moonlight** — darkens the scene and adds a localized moon halo
+7. **Overcast** — semi-transparent cloud darkness
+8. **Rain** — canvas particle simulation
+9. **CSS lightning fallback** — used when the full-scene clip is unavailable
+10. **Vignette** — foreground framing
+
+Opaque Lightning and Mausoleum clips share a muted, autoplay-safe full-scene
+video layer between the painted scene and global colour/weather treatments.
+They crop the 864×496 footage into 16:9 without stretching, exclude the
+burned-in top-left watermark region, and take the same busy lock as raven
+gestures. Lightning is weather/debug driven. Mausoleum is available through
+debug `m` and `RavenPortrait.triggerMausoleum()` but intentionally has no
+invented production schedule.
 
 `weather.js` drives `setRain`, `setFog`, `setNight`, `setOvercast`, and `triggerLightning` via `window.RavenPortrait` once `CONFIG.latitude`/`CONFIG.longitude` are set. The debug panel can drive them manually.
 
@@ -101,6 +110,7 @@ g = wing stretch
 f = flight away (auto-triggers return — NEVER trigger return manually)
 n = reminder that flight-return is automatic only
 l = lightning
+m = mausoleum
 1 = toggle rain
 2 = fog
 3 = toggle night
