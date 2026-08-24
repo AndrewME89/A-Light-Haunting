@@ -4,9 +4,10 @@
 
    Layer order (back to front):
      1 cemetery background   2 far fog   3 raven   4 near fog
-     5 day/night   6 clouds/overcast   7 rain   8 lightning   9 vignette
+     5 environment video   6 day/night + moon   7 clouds/overcast
+     8 rain   9 CSS lightning fallback   10 vignette
 
-   The raven rests as a single static image (assets/raven/raven-normal.png).
+   The raven rests as part of assets/backgrounds/hero.png.
    Gestures (blink, ruffle, head-move, subtle, look-viewer) are short video
    clips, real-time keyed and composited by app.js's WebGL layer onto the
    canvas here — see README "How the raven animates". */
@@ -159,6 +160,20 @@ html, body {
   animation-name: fogDriftNear;
   animation-duration: 260s;
 }
+
+/* Opaque 864x496 clips crop into the 16:9 painting without stretching.
+   The small top-left cutout deliberately excludes their burned-in AI mark;
+   the corresponding live scene remains visible below. */
+.layer-environment-video {
+  z-index: 5;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0;
+  transition: opacity var(--environment-crossfade-ms, 180ms) ease;
+  -webkit-clip-path: polygon(7% 0, 100% 0, 100% 100%, 0 100%, 0 7%, 7% 7%);
+  clip-path: polygon(7% 0, 100% 0, 100% 100%, 0 100%, 0 7%, 7% 7%);
+}
+.layer-environment-video.environment-video-active { opacity: 1; }
 /* Small, slow parallax — never a scrolling/tiling texture. Direction
    reverses smoothly via `alternate` rather than jumping back to start. */
 @keyframes fogDriftFar {
@@ -174,7 +189,7 @@ html, body {
 /* 7. Rain                                                           */
 /* ---------------------------------------------------------------- */
 .layer-rain {
-  z-index: 7;
+  z-index: 8;
   opacity: 0;
   transition: opacity 2.5s ease;
 }
@@ -184,7 +199,7 @@ html, body {
 /* 5. Day/night + 6. cloud/overcast darkness                         */
 /* ---------------------------------------------------------------- */
 .layer-daynight {
-  z-index: 5;
+  z-index: 6;
   background: linear-gradient(180deg, rgba(10,14,26,0) 0%, rgba(10,14,26,0) 100%);
   mix-blend-mode: multiply;
   opacity: 0;
@@ -195,8 +210,19 @@ html, body {
   background: linear-gradient(180deg, rgba(10,18,38,0.55) 0%, rgba(6,10,22,0.72) 100%);
 }
 
-.layer-clouds {
+.layer-moonlight {
   z-index: 6;
+  opacity: 0;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(circle at 27% 13%, rgba(224,232,220,0.34) 0%, rgba(184,202,211,0.16) 4%, rgba(139,164,184,0.07) 11%, transparent 25%),
+    radial-gradient(ellipse at 27% 14%, rgba(166,188,202,0.09) 0%, transparent 38%);
+  transition: opacity 8s ease;
+}
+.layer-moonlight.is-night { opacity: 1; }
+
+.layer-clouds {
+  z-index: 7;
   background: rgba(20,22,28,0);
   mix-blend-mode: multiply;
   opacity: 0;
@@ -211,7 +237,7 @@ html, body {
 /* 8. Lightning                                                      */
 /* ---------------------------------------------------------------- */
 .layer-lightning {
-  z-index: 8;
+  z-index: 9;
   background: radial-gradient(ellipse at 50% 15%, rgba(220,228,255,0.9), rgba(220,228,255,0.15) 55%, transparent 75%);
   opacity: 0;
   mix-blend-mode: screen;
@@ -238,7 +264,7 @@ html, body {
 /* 9. Foreground vignette — sells the "framed painting" feel        */
 /* ---------------------------------------------------------------- */
 .layer-vignette {
-  z-index: 9;
+  z-index: 10;
   background: radial-gradient(ellipse at center,
     rgba(0,0,0,0) 55%, rgba(0,0,0,0.28) 85%, rgba(0,0,0,0.55) 100%);
   box-shadow: inset 0 0 14vmin rgba(0,0,0,0.55);

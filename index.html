@@ -28,8 +28,14 @@
       <!-- 4. Near fog — painted overlay, passes in front of the raven -->
       <div class="layer layer-fog layer-fog-near" id="layer-fog-near"></div>
 
+      <!-- Full-scene environmental clips. The source watermark corner is
+           excluded in CSS so the live painting remains visible beneath. -->
+      <video class="layer layer-environment-video" id="environment-video"
+             muted playsinline preload="auto" aria-hidden="true"></video>
+
       <!-- 5. Day/night colour treatment -->
       <div class="layer layer-daynight" id="layer-daynight"></div>
+      <div class="layer layer-moonlight" id="layer-moonlight"></div>
 
       <!-- 6. Cloud / overcast darkness treatment -->
       <div class="layer layer-clouds" id="layer-clouds"></div>
@@ -69,7 +75,7 @@
     <div class="debug-hint">
       b=blink e=double-blink r=ruffle h=head-turn u=feather-settle v=look-viewer<br />
       p=preen g=wing-stretch f=flight-away (auto-triggers return)<br />
-      l=lightning 1=rain 2=fog 3=night 4=storm 0=reset<br />
+      l=lightning m=mausoleum 1=rain 2=fog 3=night 4=storm 0=reset<br />
       a/i/s/w=ACTIVE/IDLE/SLEEP/AWAY &nbsp; d=hide panel
     </div>
   </div>
